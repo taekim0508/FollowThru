@@ -22,7 +22,7 @@ struct AuthView: View {
                     .strokeBorder(Theme.sage, lineWidth: 3)
                     .frame(width: 72, height: 72)
                     .overlay(Image(systemName: "leaf.fill").foregroundColor(Theme.sage).font(.system(size: 28)))
-                Text("HabitFlow")
+                Text("FollowThru")
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundColor(Theme.primary)
             }
