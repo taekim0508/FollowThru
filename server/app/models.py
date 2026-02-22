@@ -2,6 +2,7 @@ from sqlmodel import SQLModel, Field, Relationship
 from datetime import datetime, date
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import Column, JSON
 
 # ===== DATABASE MODELS (SQLModel - used for both DB and API responses) =====
 
@@ -42,7 +43,8 @@ class Habit(SQLModel, table=True):
     
     # Frequency info (universal via JSONB)
     frequency_type: str = Field(max_length=20)  # "daily" or "custom"
-    frequency_pattern: Optional[dict] = Field(default=None, sa_column_kwargs={"type_": "JSONB"})
+    # Use generic JSON so the skeleton works across SQLite/Postgres during early development.
+    frequency_pattern: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
     # Example: {"days": ["monday", "tuesday", "wednesday", "thursday", "friday"]}
     
     # Optional tracking (adapts to habit needs)
