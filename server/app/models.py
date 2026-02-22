@@ -2,7 +2,7 @@ from sqlmodel import SQLModel, Field, Relationship
 from datetime import datetime, date
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, JSON, UniqueConstraint, Index
 
 # ===== DATABASE MODELS (SQLModel - used for both DB and API responses) =====
 
@@ -21,6 +21,25 @@ class User(SQLModel, table=True):
     habits: List["Habit"] = Relationship(back_populates="user")
     completions: List["Completion"] = Relationship(back_populates="user")
 
+    # Friend requests
+    sent_friend_requests: List["FriendRequest"] = Relationship(
+        back_populates="requester",
+        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.requester_id]"},
+    )
+    received_friend_requests: List["FriendRequest"] = Relationship(
+        back_populates="receiver",
+        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.receiver_id]"},
+    )
+
+    # Friendships (accepted friends)
+    friendships_as_low: List["Friendship"] = Relationship(
+        back_populates="user_low",
+        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_low_id]"},
+    )
+    friendships_as_high: List["Friendship"] = Relationship(
+        back_populates="user_high",
+        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_high_id]"},
+    )
 
 class Habit(SQLModel, table=True):
     """
@@ -74,6 +93,11 @@ class Completion(SQLModel, table=True):
     One record per completed day. Critical for streak calculation.
     """
     __tablename__ = "completions"
+
+    __table_args__ = (
+        UniqueConstraint("habit_id", "completed_date", name="uq_completion_habit_day"),
+        Index("ix_completions_user_day", "user_id", "completed_date"),
+    )
     
     id: Optional[int] = Field(default=None, primary_key=True)
     habit_id: int = Field(foreign_key="habits.id", index=True)
@@ -90,12 +114,6 @@ class Completion(SQLModel, table=True):
     # Relationships
     habit: Optional[Habit] = Relationship(back_populates="completions")
     user: Optional[User] = Relationship(back_populates="completions")
-    
-    class Config:
-        # Ensure one completion per habit per day
-        table_args = (
-            {"schema": "public", "extend_existing": True},
-        )
 
 
 # ===== REQUEST SCHEMAS (Pydantic - only for API input validation) =====
@@ -150,3 +168,73 @@ class AIGenerateRequest(BaseModel):
     user_goal: str  # Natural language: "I want to pray except weekends"
     category: str  # fitness, study, wellness, reading, sleep
     context: Optional[dict] = None  # {"experience_level": "beginner", "available_time": 15}
+
+# ===== FRIENDS MODELS =====
+
+class FriendRequest(SQLModel, table=True):
+    """
+    Friend request model.
+    One directional request: requester -> receiver.
+    """
+    __tablename__ = "friend_requests"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    requester_id: int = Field(foreign_key="users.id", index=True)
+    receiver_id: int = Field(foreign_key="users.id", index=True)
+
+    status: str = Field(default="pending", max_length=20)
+    # pending, accepted, declined, canceled
+
+    message: Optional[str] = Field(default=None, max_length=280)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    responded_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"onupdate": datetime.utcnow})
+
+    # Relationships
+    requester: Optional["User"] = Relationship(
+        back_populates="sent_friend_requests",
+        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.requester_id]"},
+    )
+    receiver: Optional["User"] = Relationship(
+        back_populates="received_friend_requests",
+        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.receiver_id]"},
+    )
+
+    __table_args__ = (
+        # prevents duplicate pending requests in the same direction
+        UniqueConstraint("requester_id", "receiver_id", name="uq_friend_request_pair"),
+        Index("ix_friend_requests_receiver_status", "receiver_id", "status"),
+    )
+
+
+class Friendship(SQLModel, table=True):
+    """
+    Friendship model.
+    Store accepted friendships as a single row with a canonical (user_low_id, user_high_id) ordering.
+    """
+    __tablename__ = "friendships"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    user_low_id: int = Field(foreign_key="users.id", index=True)
+    user_high_id: int = Field(foreign_key="users.id", index=True)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Relationships
+    user_low: Optional["User"] = Relationship(
+        back_populates="friendships_as_low",
+        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_low_id]"},
+    )
+    user_high: Optional["User"] = Relationship(
+        back_populates="friendships_as_high",
+        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_high_id]"},
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_low_id", "user_high_id", name="uq_friendship_pair"),
+        Index("ix_friendships_user_low", "user_low_id"),
+        Index("ix_friendships_user_high", "user_high_id"),
+    )
