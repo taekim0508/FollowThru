@@ -14,7 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..database import get_session
-from ..models import User, UserCreate, UserLogin
+from ..models import User, UserCreate, UserLogin, UserUpdate  # UserUpdate for PATCH /me
+from ..deps import current_user  # for GET /me and PATCH /me
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -109,3 +110,39 @@ def login(payload: UserLogin, session: Session = Depends(get_session)):
 def logout():
     # Stateless JWT logout: tests expect 200. :contentReference[oaicite:5]{index=5}
     return {"message": "logged out"}
+
+
+@router.get("/me", status_code=status.HTTP_200_OK)
+def get_me(user: User = Depends(current_user)):
+    return public_user(user)
+
+
+@router.patch("/me", status_code=status.HTTP_200_OK)
+def update_me(
+    payload: UserUpdate,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+):
+    if payload.name is not None:
+        user.name = payload.name
+
+    if payload.email is not None and payload.email != user.email:
+        existing = session.exec(select(User).where(User.email == payload.email)).first()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
+        user.email = payload.email
+
+    if payload.new_password is not None:
+        if not payload.current_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="current_password required to set a new password")
+        if not verify_password(payload.current_password, user.password_hash):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="current_password is incorrect")
+        if len(payload.new_password) < 6:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password too short")
+        user.password_hash = hash_password(payload.new_password)
+
+    user.updated_at = datetime.utcnow()  # set manually; onupdate is unreliable here
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return public_user(user)

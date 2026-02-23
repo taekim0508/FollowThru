@@ -131,6 +131,14 @@ class UserLogin(BaseModel):
     password: str
 
 
+class UserUpdate(BaseModel):
+    """Schema for updating the authenticated user's profile"""
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+    
+
 class HabitCreate(BaseModel):
     """Schema for creating a new habit (from AI or manual)"""
     name: str
