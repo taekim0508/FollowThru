@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Combine
 
+@MainActor
 final class AppState: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published var currentUser: User? = nil
@@ -10,13 +11,101 @@ final class AppState: ObservableObject {
     @Published var selectedHabit: Habit? = nil
     @Published var showCompletionModal: Bool = false
 
+    // Auth state
+    @Published var isAuthLoading: Bool = false
+    @Published var authError: String? = nil
+
+    // MARK: - Auth
+
+    func register(email: String, password: String, username: String) async {
+        isAuthLoading = true
+        authError = nil
+
+        do {
+            let (user, token) = try await AuthAPI.register(email: email, password: password, name: username)
+            TokenStore.save(token)
+            currentUser = user
+            isAuthenticated = true
+        } catch {
+            if let err = error as? LocalizedError, let msg = err.errorDescription {
+                authError = msg
+            } else {
+                authError = error.localizedDescription
+            }
+        }
+
+        isAuthLoading = false
+    }
+
+    func login(email: String, password: String) async {
+        isAuthLoading = true
+        authError = nil
+
+        do {
+            let (user, token) = try await AuthAPI.login(email: email, password: password)
+            TokenStore.save(token)
+            currentUser = user
+            isAuthenticated = true
+        } catch {
+            if let err = error as? LocalizedError, let msg = err.errorDescription {
+                authError = msg
+            } else {
+                authError = error.localizedDescription
+            }
+        }
+
+        isAuthLoading = false
+    }
+
+    func restoreSessionIfNeeded() async {
+        guard TokenStore.hasToken, !isAuthenticated else { return }
+
+        isAuthLoading = true
+        authError = nil
+
+        do {
+            let user = try await AuthAPI.getMe()
+            currentUser = user
+            isAuthenticated = true
+        } catch {
+            // If token is invalid/expired, clear it and stay logged out.
+            TokenStore.clear()
+            isAuthenticated = false
+            currentUser = nil
+        }
+
+        isAuthLoading = false
+    }
+
     func logout() {
+        TokenStore.clear()
         isAuthenticated = false
         currentUser = nil
         habits = []
         logs = []
         selectedHabit = nil
     }
+
+    /// Update profile (name, email, password). Pass only fields that changed; use nil to skip.
+    func updateAccount(name: String? = nil, email: String? = nil, currentPassword: String? = nil, newPassword: String? = nil) async {
+        isAuthLoading = true
+        authError = nil
+
+        do {
+            let user = try await AuthAPI.updateMe(name: name, email: email, currentPassword: currentPassword, newPassword: newPassword)
+            currentUser = user
+        } catch {
+            if let err = error as? LocalizedError, let msg = err.errorDescription {
+                authError = msg
+            } else {
+                authError = error.localizedDescription
+            }
+        }
+
+        isAuthLoading = false
+    }
+
+    // MARK: - Habits & logs
 
     func logsFor(habit: Habit, in month: Date) -> [HabitLog] {
         let cal = Calendar.current

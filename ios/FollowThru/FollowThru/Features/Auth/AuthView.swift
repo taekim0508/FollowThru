@@ -9,7 +9,7 @@ struct AuthView: View {
     @State private var password = ""
 
     private var canSubmit: Bool {
-        !email.isEmpty && !password.isEmpty && (isSignUp ? !username.isEmpty : true)
+        !email.isEmpty && !password.isEmpty && (isSignUp ? !username.isEmpty : true) && !appState.isAuthLoading
     }
 
     var body: some View {
@@ -50,6 +50,16 @@ struct AuthView: View {
             }
             .padding(.horizontal)
 
+            // Error
+            if let error = appState.authError {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+            }
+
             Spacer()
 
             // Action button
@@ -66,10 +76,13 @@ struct AuthView: View {
     // MARK: - Helpers
 
     private func submit() {
-        let uid = UUID().uuidString
-        let name = isSignUp ? username : String(email.split(separator: "@").first ?? "User")
-        appState.currentUser = User(id: uid, email: email, username: name)
-        appState.isAuthenticated = true
+        Task {
+            if isSignUp {
+                await appState.register(email: email, password: password, username: username)
+            } else {
+                await appState.login(email: email, password: password)
+            }
+        }
     }
 
     @ViewBuilder
