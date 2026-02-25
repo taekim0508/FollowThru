@@ -4,6 +4,7 @@ struct HomeView: View {
     @EnvironmentObject var appState: AppState
     @State private var showCreate = false
     @State private var showCelebration = false
+    @State private var selectedHabitForDetail: Habit? = nil
 
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
@@ -67,6 +68,13 @@ struct HomeView: View {
             .sheet(isPresented: $showCelebration) {
                 CelebrationView()
                     .presentationDetents([.medium])
+            }
+            .sheet(isPresented: $showCreate) {
+                CreateHabitView()
+            }
+            .sheet(item: $selectedHabitForDetail) { habit in
+                HabitDetailView(habit: habit)
+                    .environmentObject(appState)
             }
         }
     }
@@ -137,6 +145,9 @@ struct HomeView: View {
                     }
                 }
             }
+        }
+        .onTapGesture {
+            selectedHabitForDetail = habit
         }
     }
 

@@ -124,16 +124,32 @@ final class AppState: ObservableObject {
         }
     }
 
-    func markComplete(habit: Habit, note: String? = nil) {
+    func markComplete(habit: Habit, value: Double? = nil, note: String? = nil, completed: Bool = true) {
         let log = HabitLog(
             habitId: habit.id,
             date: Date(),
-            completed: true,
+            completed: completed,
+            value: value,
             note: note
         )
         logs.append(log)
-        if let idx = habits.firstIndex(where: { $0.id == habit.id }) {
+        if completed, let idx = habits.firstIndex(where: { $0.id == habit.id }) {
             habits[idx].streak += 1
         }
+    }
+    
+    func deleteHabit(_ habit: Habit) {
+        habits.removeAll { $0.id == habit.id }
+        logs.removeAll { $0.habitId == habit.id }
+    }
+    
+    func updateHabit(_ habit: Habit, name: String, description: String, kpiType: KPIType, kpiTarget: Double?, scheduledDays: [Int], scheduledTime: Date?) {
+        guard let idx = habits.firstIndex(where: { $0.id == habit.id }) else { return }
+        habits[idx].name = name
+        habits[idx].description = description
+        habits[idx].kpiType = kpiType
+        habits[idx].kpiTarget = kpiTarget
+        habits[idx].scheduledDays = scheduledDays
+        habits[idx].scheduledTime = scheduledTime
     }
 }

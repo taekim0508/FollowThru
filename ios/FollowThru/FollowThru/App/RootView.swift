@@ -32,8 +32,9 @@ struct MainTabView: View {
             ProgressShellView()
                 .tabItem { Label("Progress", systemImage: "chart.bar") }
 
-            CommunityView()
-                .tabItem { Label("Community", systemImage: "person.2") }
+            /* Commented out for cleaner look for now. iOS only allows 5 tabs; decisions to be made here*/
+            //CommunityView()
+                //.tabItem { Label("Community", systemImage: "person.2") }
 
             ProfileView()
                 .tabItem { Label("Profile", systemImage: "person") }
