@@ -1,0 +1,338 @@
+from sqlmodel import SQLModel, Field, Relationship
+from datetime import datetime, date
+from typing import Optional, List
+from pydantic import BaseModel, EmailStr
+from sqlalchemy import Column, JSON, UniqueConstraint, Index
+
+# ===== DATABASE MODELS (SQLModel - used for both DB and API responses) =====
+
+class User(SQLModel, table=True):
+    """User model - foundation for all habits and completions"""
+    __tablename__ = "users"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(unique=True, index=True)
+    password_hash: str
+    name: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"onupdate": datetime.utcnow})
+    
+    # Relationships (not stored in DB, just for querying)
+    habits: List["Habit"] = Relationship(back_populates="user")
+    completions: List["Completion"] = Relationship(back_populates="user")
+
+    # Friend requests
+    sent_friend_requests: List["FriendRequest"] = Relationship(
+        back_populates="requester",
+        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.requester_id]"},
+    )
+    received_friend_requests: List["FriendRequest"] = Relationship(
+        back_populates="receiver",
+        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.receiver_id]"},
+    )
+
+    # Friendships (accepted friends)
+    friendships_as_low: List["Friendship"] = Relationship(
+        back_populates="user_low",
+        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_low_id]"},
+    )
+    friendships_as_high: List["Friendship"] = Relationship(
+        back_populates="user_high",
+        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_high_id]"},
+    )
+
+class Habit(SQLModel, table=True):
+    __tablename__ = "habits"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+
+    name: str = Field(max_length=100)
+    category: str = Field(max_length=50)
+    description: str
+
+    trigger_type: str = Field(max_length=20, default="time")
+    trigger_value: str = Field(max_length=10)
+
+    frequency_type: str = Field(max_length=20)
+    frequency_pattern: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
+
+    # NEW
+    habit_type: str = Field(default="binary", max_length=20)  # binary or tracked
+    target_value: Optional[float] = None
+
+    requires_quantity: bool = Field(default=False)
+    quantity_unit: Optional[str] = Field(default=None, max_length=20)
+    allows_notes: bool = Field(default=True)
+
+    motivation_statement: Optional[str] = None
+    status: str = Field(default="active", max_length=20)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: Optional[date] = None
+    updated_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"onupdate": datetime.utcnow})
+
+    user: Optional[User] = Relationship(back_populates="habits")
+    completions: List["Completion"] = Relationship(back_populates="habit")
+
+
+class Completion(SQLModel, table=True):
+    __tablename__ = "completions"
+
+    __table_args__ = (
+        UniqueConstraint("habit_id", "completed_date", name="uq_completion_habit_day"),
+        Index("ix_completions_user_day", "user_id", "completed_date"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    habit_id: int = Field(foreign_key="habits.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+
+    completed_date: date = Field(index=True)
+    completed_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # CHANGED
+    progress_value: Optional[float] = None
+    is_complete: bool = Field(default=False)
+
+    note: Optional[str] = None
+
+    habit: Optional[Habit] = Relationship(back_populates="completions")
+    user: Optional[User] = Relationship(back_populates="completions")
+
+
+# ===== REQUEST SCHEMAS (Pydantic - only for API input validation) =====
+
+class UserCreate(BaseModel):
+    """Schema for user registration"""
+    email: EmailStr
+    password: str
+    name: Optional[str] = None
+
+
+class UserLogin(BaseModel):
+    """Schema for user login"""
+    email: EmailStr
+    password: str
+
+
+class UserUpdate(BaseModel):
+    """Schema for updating the authenticated user's profile"""
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+    
+
+class HabitCreate(BaseModel):
+    name: str
+    category: str
+    description: str
+    trigger_type: str = "time"
+    trigger_value: str
+    frequency_type: str
+    frequency_pattern: Optional[dict] = None
+
+    habit_type: str = "binary"   # binary or tracked
+    target_value: Optional[float] = None
+
+    requires_quantity: bool = False
+    quantity_unit: Optional[str] = None
+    allows_notes: bool = True
+    motivation_statement: Optional[str] = None
+
+
+class HabitUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    trigger_value: Optional[str] = None
+    frequency_type: Optional[str] = None
+    frequency_pattern: Optional[dict] = None
+
+    habit_type: Optional[str] = None
+    target_value: Optional[float] = None
+    quantity_unit: Optional[str] = None
+    requires_quantity: Optional[bool] = None
+
+    status: Optional[str] = None
+
+
+class CompletionCreate(SQLModel):
+    completed_date: date
+    progress_value: Optional[float] = None
+    note: Optional[str] = None
+
+
+class AIGenerateRequest(BaseModel):
+    """Schema for AI habit generation request"""
+    user_goal: str  # Natural language: "I want to pray except weekends"
+    category: str  # fitness, study, wellness, reading, sleep
+    context: Optional[dict] = None  # {"experience_level": "beginner", "available_time": 15}
+
+# ===== FRIENDS MODELS =====
+
+class FriendRequest(SQLModel, table=True):
+    """
+    Friend request model.
+    One directional request: requester -> receiver.
+    """
+    __tablename__ = "friend_requests"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    requester_id: int = Field(foreign_key="users.id", index=True)
+    receiver_id: int = Field(foreign_key="users.id", index=True)
+
+    status: str = Field(default="pending", max_length=20)
+    # pending, accepted, declined, canceled
+
+    message: Optional[str] = Field(default=None, max_length=280)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    responded_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"onupdate": datetime.utcnow})
+
+    # Relationships
+    requester: Optional["User"] = Relationship(
+        back_populates="sent_friend_requests",
+        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.requester_id]"},
+    )
+    receiver: Optional["User"] = Relationship(
+        back_populates="received_friend_requests",
+        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.receiver_id]"},
+    )
+
+    __table_args__ = (
+        # prevents duplicate pending requests in the same direction
+        UniqueConstraint("requester_id", "receiver_id", name="uq_friend_request_pair"),
+        Index("ix_friend_requests_receiver_status", "receiver_id", "status"),
+    )
+
+
+class Friendship(SQLModel, table=True):
+    """
+    Friendship model.
+    Store accepted friendships as a single row with a canonical (user_low_id, user_high_id) ordering.
+    """
+    __tablename__ = "friendships"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    user_low_id: int = Field(foreign_key="users.id", index=True)
+    user_high_id: int = Field(foreign_key="users.id", index=True)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Relationships
+    user_low: Optional["User"] = Relationship(
+        back_populates="friendships_as_low",
+        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_low_id]"},
+    )
+    user_high: Optional["User"] = Relationship(
+        back_populates="friendships_as_high",
+        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_high_id]"},
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_low_id", "user_high_id", name="uq_friendship_pair"),
+        Index("ix_friendships_user_low", "user_low_id"),
+        Index("ix_friendships_user_high", "user_high_id"),
+    )
+
+
+# ===== COMMUNITY FEED =====
+
+
+class CommunityPost(SQLModel, table=True):
+    """Feed item (e.g. goal met, streak milestone). Visible to author + friends."""
+
+    __tablename__ = "community_posts"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    author_id: int = Field(foreign_key="users.id", index=True)
+    habit_id: Optional[int] = Field(default=None, foreign_key="habits.id", index=True)
+
+    post_type: str = Field(max_length=40)  # goal_met, streak_milestone
+    title: str = Field(max_length=200)
+    body: str = Field(max_length=2000)
+    meta_json: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PostLike(SQLModel, table=True):
+    __tablename__ = "post_likes"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    post_id: int = Field(foreign_key="community_posts.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id", name="uq_post_like_user"),
+        Index("ix_post_likes_post", "post_id"),
+    )
+
+
+class PostComment(SQLModel, table=True):
+    __tablename__ = "post_comments"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    post_id: int = Field(foreign_key="community_posts.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    body: str = Field(max_length=2000)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    __table_args__ = (Index("ix_post_comments_post", "post_id"),)
+
+
+class UserSearchResult(BaseModel):
+    """Search result with relationship hint for UI."""
+
+    id: int
+    email: str
+    name: Optional[str] = None
+    relationship: str  # none | friends | pending_sent | pending_received
+
+
+class FriendProfile(BaseModel):
+    id: int
+    email: str
+    name: Optional[str] = None
+
+
+class FriendRequestInboxItem(BaseModel):
+    id: int
+    requester_id: int
+    requester_name: Optional[str] = None
+    requester_email: str
+    message: Optional[str] = None
+    created_at: datetime
+
+
+class CommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class FeedPostOut(BaseModel):
+    id: int
+    author_id: int
+    author_name: Optional[str] = None
+    author_email: str
+    post_type: str
+    title: str
+    body: str
+    habit_id: Optional[int] = None
+    created_at: datetime
+    like_count: int
+    comment_count: int
+    viewer_has_liked: bool
+
+
+class CommentOut(BaseModel):
+    id: int
+    user_id: int
+    author_name: Optional[str] = None
+    author_email: str
+    body: str
+    created_at: datetime
