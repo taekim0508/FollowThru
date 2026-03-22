@@ -246,3 +246,101 @@ class Friendship(SQLModel, table=True):
         Index("ix_friendships_user_low", "user_low_id"),
         Index("ix_friendships_user_high", "user_high_id"),
     )
+
+
+# ===== COMMUNITY FEED =====
+
+
+class CommunityPost(SQLModel, table=True):
+    """Feed item (e.g. goal met, streak milestone). Visible to author + friends."""
+
+    __tablename__ = "community_posts"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    author_id: int = Field(foreign_key="users.id", index=True)
+    habit_id: Optional[int] = Field(default=None, foreign_key="habits.id", index=True)
+
+    post_type: str = Field(max_length=40)  # goal_met, streak_milestone
+    title: str = Field(max_length=200)
+    body: str = Field(max_length=2000)
+    meta_json: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PostLike(SQLModel, table=True):
+    __tablename__ = "post_likes"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    post_id: int = Field(foreign_key="community_posts.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id", name="uq_post_like_user"),
+        Index("ix_post_likes_post", "post_id"),
+    )
+
+
+class PostComment(SQLModel, table=True):
+    __tablename__ = "post_comments"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    post_id: int = Field(foreign_key="community_posts.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    body: str = Field(max_length=2000)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    __table_args__ = (Index("ix_post_comments_post", "post_id"),)
+
+
+class UserSearchResult(BaseModel):
+    """Search result with relationship hint for UI."""
+
+    id: int
+    email: str
+    name: Optional[str] = None
+    relationship: str  # none | friends | pending_sent | pending_received
+
+
+class FriendProfile(BaseModel):
+    id: int
+    email: str
+    name: Optional[str] = None
+
+
+class FriendRequestInboxItem(BaseModel):
+    id: int
+    requester_id: int
+    requester_name: Optional[str] = None
+    requester_email: str
+    message: Optional[str] = None
+    created_at: datetime
+
+
+class CommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class FeedPostOut(BaseModel):
+    id: int
+    author_id: int
+    author_name: Optional[str] = None
+    author_email: str
+    post_type: str
+    title: str
+    body: str
+    habit_id: Optional[int] = None
+    created_at: datetime
+    like_count: int
+    comment_count: int
+    viewer_has_liked: bool
+
+
+class CommentOut(BaseModel):
+    id: int
+    user_id: int
+    author_name: Optional[str] = None
+    author_email: str
+    body: str
+    created_at: datetime

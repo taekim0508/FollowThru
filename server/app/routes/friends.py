@@ -5,12 +5,21 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..database import get_session
 from ..deps import current_user
-from ..models import User, FriendRequest, Friendship
+from ..models import (
+    FriendProfile,
+    FriendRequest,
+    FriendRequestInboxItem,
+    Friendship,
+    User,
+    UserSearchResult,
+)
+from ..services.community_feed import are_friends
 
 router = APIRouter(prefix="/api/friends", tags=["friends"])
 
@@ -18,6 +27,94 @@ router = APIRouter(prefix="/api/friends", tags=["friends"])
 def _friendship_pair(a: int, b: int) -> tuple[int, int]:
     low, high = sorted([a, b])
     return low, high
+
+
+def _relationship_status(session: Session, me: User, other: User) -> str:
+    if are_friends(session, me.id, other.id):
+        return "friends"
+    out_pending = session.exec(
+        select(FriendRequest).where(
+            FriendRequest.requester_id == me.id,
+            FriendRequest.receiver_id == other.id,
+            FriendRequest.status == "pending",
+        )
+    ).first()
+    if out_pending:
+        return "pending_sent"
+    in_pending = session.exec(
+        select(FriendRequest).where(
+            FriendRequest.requester_id == other.id,
+            FriendRequest.receiver_id == me.id,
+            FriendRequest.status == "pending",
+        )
+    ).first()
+    if in_pending:
+        return "pending_received"
+    return "none"
+
+
+@router.get("/search", response_model=List[UserSearchResult])
+def search_users(
+    q: str = Query(..., min_length=1),
+    session: Session = Depends(get_session),
+    user: User = Depends(current_user),
+):
+    """Search users by email or name (excludes self)."""
+    q = q.strip()
+    if len(q) < 2:
+        return []
+    pattern = f"%{q}%"
+    stmt = (
+        select(User)
+        .where(User.id != user.id)
+        .where(
+            or_(
+                User.email.ilike(pattern),
+                User.name.ilike(pattern),
+            )
+        )
+        .limit(25)
+    )
+    rows = session.exec(stmt).all()
+    return [
+        UserSearchResult(
+            id=u.id,
+            email=u.email,
+            name=u.name,
+            relationship=_relationship_status(session, user, u),
+        )
+        for u in rows
+    ]
+
+
+@router.get("/requests/inbox/detail", response_model=List[FriendRequestInboxItem])
+def inbox_detail(
+    session: Session = Depends(get_session),
+    user: User = Depends(current_user),
+):
+    """Pending incoming friend requests with requester names."""
+    reqs = session.exec(
+        select(FriendRequest)
+        .where(FriendRequest.receiver_id == user.id)
+        .where(FriendRequest.status == "pending")
+        .order_by(FriendRequest.created_at.desc())
+    ).all()
+    out: List[FriendRequestInboxItem] = []
+    for r in reqs:
+        u = session.get(User, r.requester_id)
+        if not u:
+            continue
+        out.append(
+            FriendRequestInboxItem(
+                id=r.id,
+                requester_id=r.requester_id,
+                requester_name=u.name,
+                requester_email=u.email,
+                message=r.message,
+                created_at=r.created_at,
+            )
+        )
+    return out
 
 
 @router.post("/requests", status_code=status.HTTP_201_CREATED)
@@ -180,23 +277,48 @@ def list_friends(session: Session = Depends(get_session), user: User = Depends(c
     ]
 
 
-@router.delete("/{friend_id}", status_code=status.HTTP_200_OK)
-def unfriend(
-    friend_id: int,
+@router.get("/list/detail", response_model=List[FriendProfile])
+def list_friends_detail(
     session: Session = Depends(get_session),
     user: User = Depends(current_user),
 ):
-    if friend_id == user.id:
-        raise HTTPException(status_code=400, detail="Invalid friend id")
+    """Friends with id, name, and email for the Community tab."""
+    friendships = session.exec(
+        select(Friendship).where(
+            (Friendship.user_low_id == user.id) | (Friendship.user_high_id == user.id)
+        )
+    ).all()
+    ids = [
+        f.user_high_id if f.user_low_id == user.id else f.user_low_id
+        for f in friendships
+    ]
+    out: List[FriendProfile] = []
+    for fid in ids:
+        u = session.get(User, fid)
+        if u:
+            out.append(FriendProfile(id=u.id, email=u.email, name=u.name))
+    out.sort(key=lambda x: (x.name or x.email).lower())
+    return out
 
-    low, high = _friendship_pair(user.id, friend_id)
-    friendship = session.exec(
-        select(Friendship).where(Friendship.user_low_id == low, Friendship.user_high_id == high)
-    ).first()
 
-    if not friendship:
-        raise HTTPException(status_code=404, detail="Not friends")
+# commented out unfriending for now, may be used later
+# @router.delete("/{friend_id}", status_code=status.HTTP_200_OK)
+# def unfriend(
+#     friend_id: int,
+#     session: Session = Depends(get_session),
+#     user: User = Depends(current_user),
+# ):
+#     if friend_id == user.id:
+#         raise HTTPException(status_code=400, detail="Invalid friend id")
 
-    session.delete(friendship)
-    session.commit()
-    return {"message": "Unfriended"}
+#     low, high = _friendship_pair(user.id, friend_id)
+#     friendship = session.exec(
+#         select(Friendship).where(Friendship.user_low_id == low, Friendship.user_high_id == high)
+#     ).first()
+
+#     if not friendship:
+#         raise HTTPException(status_code=404, detail="Not friends")
+
+#     session.delete(friendship)
+#     session.commit()
+#     return {"message": "Unfriended"}

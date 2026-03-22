@@ -5,7 +5,16 @@ from fastapi import APIRouter, HTTPException
 from sqlmodel import Session, select
 
 from ..database import engine
-from ..models import User, Habit, Completion, FriendRequest, Friendship
+from ..models import (
+    User,
+    Habit,
+    Completion,
+    FriendRequest,
+    Friendship,
+    CommunityPost,
+    PostLike,
+    PostComment,
+)
 
 router = APIRouter(prefix="/api/debug", tags=["debug"])
 
@@ -30,6 +39,9 @@ def print_db() -> Dict[str, Any]:
         completions = s.exec(select(Completion)).all()
         friend_requests = s.exec(select(FriendRequest)).all()
         friendships = s.exec(select(Friendship)).all()
+        posts = s.exec(select(CommunityPost)).all()
+        likes = s.exec(select(PostLike)).all()
+        comments = s.exec(select(PostComment)).all()
 
         return {
             "users": [u.model_dump() for u in users],
@@ -37,4 +49,7 @@ def print_db() -> Dict[str, Any]:
             "completions": [c.model_dump() for c in completions],
             "friend_requests": [fr.model_dump() for fr in friend_requests],
             "friendships": [fs.model_dump() for fs in friendships],
+            "community_posts": [p.model_dump() for p in posts],
+            "post_likes": [l.model_dump() for l in likes],
+            "post_comments": [c.model_dump() for c in comments],
         }

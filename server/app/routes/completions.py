@@ -4,6 +4,7 @@ from datetime import date
 from ..database import get_session
 from ..deps import current_user
 from ..models import Completion, CompletionCreate, Habit, User
+from ..services.community_feed import create_community_post_from_completion
 
 router = APIRouter(prefix="/api/completions", tags=["completions"])
 
@@ -40,6 +41,11 @@ def complete_habit(
     session.add(db_completion)
     session.commit()
     session.refresh(db_completion)
+
+    # Community feed: introduce one post per completion
+    # (milestone streaks get a distinct post_type due to design)
+    create_community_post_from_completion(session, habit, user, completion.completed_date)
+
     return db_completion
 
 @router.get("/habits/{habit_id}/completions")

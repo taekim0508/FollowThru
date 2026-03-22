@@ -15,6 +15,14 @@ final class AppState: ObservableObject {
     @Published var isAuthLoading: Bool = false
     @Published var authError: String? = nil
 
+    // Community
+    @Published var communityFeed: [FeedPost] = []
+    @Published var friendInbox: [FriendInboxItem] = []
+    @Published var friendsList: [FriendProfile] = []
+    @Published var userSearchResults: [UserSearchResult] = []
+    @Published var communityError: String? = nil
+    @Published var isCommunityLoading: Bool = false
+
     // MARK: - Auth
 
     func register(email: String, password: String, username: String) async {
@@ -84,6 +92,128 @@ final class AppState: ObservableObject {
         habits = []
         logs = []
         selectedHabit = nil
+        communityFeed = []
+        friendInbox = []
+        friendsList = []
+        userSearchResults = []
+        communityError = nil
+    }
+
+    // MARK: - Community
+
+    func loadCommunityData() async {
+        guard isAuthenticated else { return }
+        isCommunityLoading = true
+        communityError = nil
+        do {
+            async let feed = CommunityAPI.feed(limit: 40)
+            async let inbox = CommunityAPI.inboxDetail()
+            async let friends = CommunityAPI.friendsDetail()
+            communityFeed = try await feed
+            friendInbox = try await inbox
+            friendsList = try await friends
+        } catch {
+            if let e = error as? LocalizedError, let msg = e.errorDescription {
+                communityError = msg
+            } else {
+                communityError = error.localizedDescription
+            }
+        }
+        isCommunityLoading = false
+    }
+
+    func searchUsers(query: String) async {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else {
+            userSearchResults = []
+            return
+        }
+        communityError = nil
+        do {
+            userSearchResults = try await CommunityAPI.searchUsers(query: q)
+        } catch {
+            if let e = error as? LocalizedError, let msg = e.errorDescription {
+                communityError = msg
+            } else {
+                communityError = error.localizedDescription
+            }
+        }
+    }
+
+    func sendFriendRequest(to receiverId: Int) async {
+        communityError = nil
+        do {
+            try await CommunityAPI.sendFriendRequest(receiverId: receiverId)
+            await loadCommunityData()
+        } catch {
+            if let e = error as? LocalizedError, let msg = e.errorDescription {
+                communityError = msg
+            } else {
+                communityError = error.localizedDescription
+            }
+        }
+    }
+
+    func acceptFriendRequest(requestId: Int) async {
+        communityError = nil
+        do {
+            try await CommunityAPI.acceptFriendRequest(requestId: requestId)
+            await loadCommunityData()
+        } catch {
+            if let e = error as? LocalizedError, let msg = e.errorDescription {
+                communityError = msg
+            } else {
+                communityError = error.localizedDescription
+            }
+        }
+    }
+
+    func declineFriendRequest(requestId: Int) async {
+        communityError = nil
+        do {
+            try await CommunityAPI.declineFriendRequest(requestId: requestId)
+            await loadCommunityData()
+        } catch {
+            if let e = error as? LocalizedError, let msg = e.errorDescription {
+                communityError = msg
+            } else {
+                communityError = error.localizedDescription
+            }
+        }
+    }
+
+    func toggleLike(for post: FeedPost) async {
+        communityError = nil
+        do {
+            if post.viewerHasLiked {
+                try await CommunityAPI.unlikePost(postId: post.id)
+            } else {
+                try await CommunityAPI.likePost(postId: post.id)
+            }
+            communityFeed = try await CommunityAPI.feed(limit: 40)
+        } catch {
+            if let e = error as? LocalizedError, let msg = e.errorDescription {
+                communityError = msg
+            } else {
+                communityError = error.localizedDescription
+            }
+        }
+    }
+
+    func addComment(postId: Int, text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        communityError = nil
+        do {
+            _ = try await CommunityAPI.addComment(postId: postId, text: trimmed)
+            communityFeed = try await CommunityAPI.feed(limit: 40)
+        } catch {
+            if let e = error as? LocalizedError, let msg = e.errorDescription {
+                communityError = msg
+            } else {
+                communityError = error.localizedDescription
+            }
+        }
     }
 
     /// Update profile (name, email, password). Pass only fields that changed; use nil to skip.
