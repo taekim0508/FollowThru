@@ -1,7 +1,7 @@
 from sqlmodel import SQLModel, Field, Relationship
 from datetime import datetime, date
-from typing import Optional, List
-from pydantic import BaseModel, EmailStr
+from typing import Optional, List, Literal
+from pydantic import BaseModel, EmailStr, Field as PydanticField
 from sqlalchemy import Column, JSON, UniqueConstraint, Index
 
 # ===== DATABASE MODELS (SQLModel - used for both DB and API responses) =====
@@ -176,6 +176,46 @@ class AIGenerateRequest(BaseModel):
     user_goal: str  # Natural language: "I want to pray except weekends"
     category: str  # fitness, study, wellness, reading, sleep
     context: Optional[dict] = None  # {"experience_level": "beginner", "available_time": 15}
+
+
+class AIChatMessage(BaseModel):
+    role: Literal["assistant", "user"]
+    content: str
+
+
+class AIIntakeDraft(BaseModel):
+    goal_summary: Optional[str] = None
+    habit_description: Optional[str] = None
+    frequency: Optional[str] = None
+    schedule_text: Optional[str] = None
+    schedule_days: List[str] = PydanticField(default_factory=list)
+    duration_minutes: Optional[int] = None
+    experience_level: Optional[str] = None
+    category: Optional[str] = None
+    preferred_time: str = "flexible"
+    available_time: int = 15
+
+
+class AIIntakeRequest(BaseModel):
+    recent_messages: List[AIChatMessage] = []
+    current_draft: Optional[AIIntakeDraft] = None
+    latest_user_message: str
+
+
+class AIGenerateFromDraftRequest(BaseModel):
+    draft: AIIntakeDraft
+
+
+class AIPlanSnapshot(BaseModel):
+    habit_payload: HabitCreate
+    progressions: List[dict]
+
+
+class AIRevisePlanRequest(BaseModel):
+    draft: AIIntakeDraft
+    current_plan: AIPlanSnapshot
+    critique: str
+    recent_messages: List[AIChatMessage] = []
 
 # ===== FRIENDS MODELS =====
 

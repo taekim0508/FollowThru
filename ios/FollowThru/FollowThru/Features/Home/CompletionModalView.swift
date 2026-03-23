@@ -9,6 +9,7 @@ struct CompletionModalView: View {
     @State private var note = ""
     @State private var showNotes = false
     @State private var showCelebration = false
+    @State private var isSubmitting = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -37,7 +38,11 @@ struct CompletionModalView: View {
                 .font(.subheadline)
                 .foregroundColor(Theme.textSecondary)
 
-            AppButton("Yes, I did it ✓", variant: .primary) { finish(completed: true) }
+            AppButton("Yes, I did it ✓", variant: .primary) {
+                Task {
+                    await finish(completed: true)
+                }
+            }
 
             // Add a note toggle
             Button {
@@ -63,22 +68,37 @@ struct CompletionModalView: View {
             }
 
             HStack(spacing: 12) {
-                AppButton("Skip Today", variant: .secondary) { finish(completed: false) }
+                AppButton("Skip Today", variant: .secondary) {
+                    Task {
+                        await finish(completed: false)
+                    }
+                }
                 AppButton("Not Yet", variant: .secondary) { dismiss() }
+            }
+
+            if let error = appState.habitsError {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundColor(Theme.terracotta)
             }
 
             Spacer()
         }
         .padding(.horizontal, 24)
+        .disabled(isSubmitting)
         .sheet(isPresented: $showCelebration) {
             CelebrationView()
                 .presentationDetents([.medium])
         }
     }
 
-    private func finish(completed: Bool) {
+    private func finish(completed: Bool) async {
+        isSubmitting = true
+        defer { isSubmitting = false }
+
         if completed {
-            appState.markComplete(habit: habit, note: note.isEmpty ? nil : note)
+            let success = await appState.markComplete(habit: habit, note: note.isEmpty ? nil : note)
+            guard success else { return }
         }
         dismiss()
         if completed {
