@@ -6,10 +6,15 @@ struct CreateHabitView: View {
 
     @State private var name = ""
     @State private var description = ""
+    
     @State private var kpiType: KPIType = .checkbox
+    @State private var kpiDurationTarget: String = ""
+    @State private var kpiAmountTarget: String = ""
+    
     @State private var selectedDays: Set<Int> = []   // 1=Sun…7=Sat
     @State private var useTime = false
     @State private var scheduledTime = Date()
+    
 
     private let dayLabels = ["S","M","T","W","T","F","S"]
 
@@ -44,6 +49,34 @@ struct CreateHabitView: View {
                             }
                         }
                         .pickerStyle(.segmented)
+
+                        if kpiType == .duration {
+                            HStack {
+                                TextField("e.g. 30", text: $kpiDurationTarget)
+                                    .keyboardType(.numberPad)
+                                    .padding(12)
+                                    .background(Theme.white)
+                                    .cornerRadius(10)
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
+                                Text("min")
+                                    .foregroundColor(Theme.textSecondary)
+                                    .fontWeight(.semibold)
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        } else if kpiType == .count {
+                            HStack {
+                                TextField("e.g. 10", text: $kpiAmountTarget)
+                                    .keyboardType(.numberPad)
+                                    .padding(12)
+                                    .background(Theme.white)
+                                    .cornerRadius(10)
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
+                                Text("times")
+                                    .foregroundColor(Theme.textSecondary)
+                                    .fontWeight(.semibold)
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
 
                     // Days of week
@@ -102,10 +135,19 @@ struct CreateHabitView: View {
     }
 
     private func save() {
+        let targetValue: Double? = {
+            switch kpiType {
+            case .duration: return Double(kpiDurationTarget)
+            case .count:    return Double(kpiAmountTarget)
+            case .checkbox: return nil
+            }
+        }()
+
         let habit = Habit(
             name: name,
             description: description,
             kpiType: kpiType,
+            kpiTarget: targetValue,
             scheduledDays: Array(selectedDays).sorted(),
             scheduledTime: useTime ? scheduledTime : nil
         )

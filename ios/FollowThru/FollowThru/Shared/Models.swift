@@ -17,6 +17,7 @@ struct Habit: Identifiable, Codable, Hashable {
     var name: String
     var description: String = ""
     var kpiType: KPIType = .checkbox
+    var kpiTarget: Double? = nil
     var scheduledDays: [Int] = []   // 1 = Sun … 7 = Sat
     var scheduledTime: Date? = nil
     var streak: Int = 0

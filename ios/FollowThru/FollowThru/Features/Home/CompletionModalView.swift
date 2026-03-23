@@ -9,6 +9,7 @@ struct CompletionModalView: View {
     @State private var note = ""
     @State private var showNotes = false
     @State private var showCelebration = false
+    @State private var logValue: String = ""
 
     var body: some View {
         VStack(spacing: 20) {
@@ -33,11 +34,15 @@ struct CompletionModalView: View {
                 }
             }
 
-            Text("Did you complete this today?")
-                .font(.subheadline)
-                .foregroundColor(Theme.textSecondary)
-
-            AppButton("Yes, I did it ✓", variant: .primary) { finish(completed: true) }
+            // Different UI based on KPI type
+            switch habit.kpiType {
+            case .checkbox:
+                checkboxUI
+            case .duration:
+                valueUI(unit: "min", icon: "clock")
+            case .count:
+                valueUI(unit: "times", icon: "number")
+            }
 
             // Add a note toggle
             Button {
@@ -73,6 +78,77 @@ struct CompletionModalView: View {
         .sheet(isPresented: $showCelebration) {
             CelebrationView()
                 .presentationDetents([.medium])
+        }
+    }
+
+    // MARK: - KPI UI
+
+    private var checkboxUI: some View {
+        AppButton("Yes, I did it ✓", variant: .primary) {
+            finish(completed: true)
+        }
+    }
+
+    private func valueUI(unit: String, icon: String) -> some View {
+        VStack(spacing: 12) {
+            // Target hint
+            if let target = habit.kpiTarget {
+                Text("Your goal: \(Int(target)) \(unit)")
+                    .font(.subheadline)
+                    .foregroundColor(Theme.textSecondary)
+            }
+
+            // Value input
+            HStack {
+                Image(systemName: icon)
+                    .foregroundColor(Theme.primary)
+                TextField("0", text: $logValue)
+                    .keyboardType(.numberPad)
+                    .font(.title2).fontWeight(.semibold)
+                    .foregroundColor(Theme.primary)
+                Text(unit)
+                    .foregroundColor(Theme.textSecondary)
+                    .fontWeight(.semibold)
+            }
+            .padding(14)
+            .background(Theme.white)
+            .cornerRadius(12)
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.lightGray))
+
+            // Progress hint if they've typed something
+            if let entered = Double(logValue), let target = habit.kpiTarget {
+                let met = entered >= target
+                HStack(spacing: 4) {
+                    Image(systemName: met ? "checkmark.circle.fill" : "minus.circle")
+                        .foregroundColor(met ? Theme.sage : Theme.terracotta)
+                    Text(met ? "Goal reached!" : "\(Int(target - entered)) \(unit) to go")
+                        .font(.caption)
+                        .foregroundColor(met ? Theme.sage : Theme.terracotta)
+                }
+                .transition(.opacity)
+                .animation(.easeInOut, value: logValue)
+            }
+
+            AppButton("Log \(unit == "min" ? "Duration" : "Amount") ✓", variant: .primary) {
+                finishWithValue()
+            }
+            .disabled(logValue.isEmpty)
+            .opacity(logValue.isEmpty ? 0.5 : 1)
+        }
+    }
+
+    // MARK: - Logic
+
+    private func finishWithValue() {
+        let entered = Double(logValue) ?? 0
+        let target = habit.kpiTarget ?? 0
+        let completed = entered >= target
+        appState.markComplete(habit: habit, value: entered, note: note.isEmpty ? nil : note, completed: completed)
+        dismiss()
+        if completed {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                showCelebration = true
+            }
         }
     }
 

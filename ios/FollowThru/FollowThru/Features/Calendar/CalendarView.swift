@@ -3,11 +3,11 @@ import SwiftUI
 struct CalendarView: View {
     @EnvironmentObject var appState: AppState
     @State private var displayMonth = Date()
-    @State private var selectedHabit: Habit? = nil
+    @State private var selectedHabit: Habit? = nil  // nil = "All"
 
     private let cal = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible()), count: 7)
-    private let weekdayHeaders = ["Su","Mo","Tu","We","Th","Fr","Sa"]
+    private let weekdayHeaders = ["SUN","MON","TUE","WED","THU","FRI","SAT"]
 
     var body: some View {
         NavigationStack {
@@ -15,23 +15,40 @@ struct CalendarView: View {
                 VStack(spacing: 20) {
 
                     // Habit picker
-                    if !appState.habits.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(appState.habits) { habit in
-                                    let selected = selectedHabit?.id == habit.id
-                                    Button { selectedHabit = habit } label: {
-                                        Text(habit.name)
-                                            .font(.subheadline).fontWeight(selected ? .semibold : .regular)
-                                            .padding(.horizontal, 14).padding(.vertical, 8)
-                                            .background(selected ? Theme.primary : Theme.offWhite)
-                                            .foregroundColor(selected ? Theme.white : Theme.textSecondary)
-                                            .cornerRadius(20)
-                                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+
+                            // All pill — always first
+                            Button { selectedHabit = nil } label: {
+                                Text("All")
+                                    .font(.subheadline).fontWeight(selectedHabit == nil ? .semibold : .regular)
+                                    .padding(.horizontal, 14).padding(.vertical, 8)
+                                    .background(selectedHabit == nil ? Theme.primary : Theme.offWhite)
+                                    .foregroundColor(selectedHabit == nil ? Theme.white : Theme.textSecondary)
+                                    .cornerRadius(20)
+                            }
+
+                            // Separator
+                            if !appState.habits.isEmpty {
+                                Rectangle()
+                                    .fill(Theme.lightGray)
+                                    .frame(width: 1, height: 24)
+                                    .padding(.horizontal, 2)
+                            }
+
+                            ForEach(appState.habits) { habit in
+                                let selected = selectedHabit?.id == habit.id
+                                Button { selectedHabit = habit } label: {
+                                    Text(habit.name)
+                                        .font(.subheadline).fontWeight(selected ? .semibold : .regular)
+                                        .padding(.horizontal, 14).padding(.vertical, 8)
+                                        .background(selected ? Theme.primary : Theme.offWhite)
+                                        .foregroundColor(selected ? Theme.white : Theme.textSecondary)
+                                        .cornerRadius(20)
                                 }
                             }
-                            .padding(.horizontal)
                         }
+                        .padding(.horizontal)
                     }
 
                     // Month navigation
@@ -56,7 +73,6 @@ struct CalendarView: View {
 
                     // Calendar grid
                     VStack(spacing: 4) {
-                        // Weekday headers
                         HStack {
                             ForEach(weekdayHeaders, id: \.self) { d in
                                 Text(d)
@@ -68,7 +84,7 @@ struct CalendarView: View {
                         .padding(.horizontal)
 
                         LazyVGrid(columns: columns, spacing: 6) {
-                            ForEach(gridDays(), id: \.self) { date in
+                            ForEach(Array(gridDays().enumerated()), id: \.offset) { _, date in
                                 dayCell(date)
                             }
                         }
@@ -79,15 +95,9 @@ struct CalendarView: View {
                     if let habit = selectedHabit {
                         statsCard(habit: habit)
                             .padding(.horizontal)
-                    } else if appState.habits.isEmpty {
-                        Text("Create a habit to see your calendar")
-                            .font(.subheadline)
-                            .foregroundColor(Theme.textSecondary)
-                            .padding(.top, 40)
                     } else {
-                        Text("Select a habit above to see details")
-                            .font(.subheadline)
-                            .foregroundColor(Theme.textSecondary)
+                        allStatsCard
+                            .padding(.horizontal)
                     }
                 }
                 .padding(.vertical)
@@ -95,11 +105,11 @@ struct CalendarView: View {
             .background(Theme.background.ignoresSafeArea())
             .navigationTitle("Calendar")
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear {
-                if selectedHabit == nil { selectedHabit = appState.habits.first }
-            }
             .onChange(of: appState.habits.count) { _ in
-                if selectedHabit == nil { selectedHabit = appState.habits.first }
+                // If selected habit was deleted, fall back to All
+                if let selected = selectedHabit, !appState.habits.contains(where: { $0.id == selected.id }) {
+                    selectedHabit = nil
+                }
             }
         }
     }
@@ -119,7 +129,6 @@ struct CalendarView: View {
             }
         }
 
-        // Pad to complete last row
         while days.count % 7 != 0 { days.append(nil) }
         return days
     }
@@ -127,7 +136,7 @@ struct CalendarView: View {
     @ViewBuilder
     private func dayCell(_ date: Date?) -> some View {
         if let date = date {
-            let status = dayStatus(date)
+            let status = selectedHabit != nil ? dayStatus(date) : allDayStatus(date)
             let dayNum = cal.component(.day, from: date)
             let isToday = cal.isDateInToday(date)
 
@@ -148,11 +157,12 @@ struct CalendarView: View {
         }
     }
 
-    private enum DayStatus { case completed, missed, future, unscheduled }
+    // MARK: - Day Status
+
+    private enum DayStatus { case completed, partial, missed, future, unscheduled }
 
     private func dayStatus(_ date: Date) -> DayStatus {
         guard let habit = selectedHabit else { return .unscheduled }
-
         if date > Date() { return .future }
 
         let log = appState.logs.first {
@@ -160,7 +170,6 @@ struct CalendarView: View {
         }
         if let log = log { return log.completed ? .completed : .missed }
 
-        // Check if this weekday was scheduled
         let weekday = cal.component(.weekday, from: date)
         if !habit.scheduledDays.isEmpty && !habit.scheduledDays.contains(weekday) {
             return .unscheduled
@@ -168,21 +177,48 @@ struct CalendarView: View {
         return .missed
     }
 
+    private func allDayStatus(_ date: Date) -> DayStatus {
+        if date > Date() { return .future }
+        guard !appState.habits.isEmpty else { return .unscheduled }
+
+        let weekday = cal.component(.weekday, from: date)
+
+        // Only consider habits scheduled on this weekday
+        let scheduledHabits = appState.habits.filter { habit in
+            habit.scheduledDays.isEmpty || habit.scheduledDays.contains(weekday)
+        }
+        guard !scheduledHabits.isEmpty else { return .unscheduled }
+
+        let completedCount = scheduledHabits.filter { habit in
+            appState.logs.contains {
+                $0.habitId == habit.id &&
+                $0.completed &&
+                cal.isDate($0.date, inSameDayAs: date)
+            }
+        }.count
+
+        if completedCount == 0 { return .missed }
+        if completedCount == scheduledHabits.count { return .completed }
+        return .partial
+    }
+
     private func cellColor(_ status: DayStatus) -> Color {
         switch status {
-        case .completed:  return Theme.sage.opacity(0.85)
-        case .missed:     return Theme.terracotta.opacity(0.25)
-        case .future:     return Color.clear
+        case .completed:   return Theme.sage.opacity(0.85)
+        case .partial:     return Color.orange.opacity(0.55)
+        case .missed:      return Theme.terracotta.opacity(0.25)
+        case .future:      return Color.clear
         case .unscheduled: return Color.clear
         }
     }
 
     private func cellTextColor(_ status: DayStatus) -> Color {
         switch status {
-        case .completed:  return Theme.white
-        case .missed:     return Theme.terracotta
-        case .future:     return Theme.textSecondary
-        case .unscheduled: return Theme.lightGray
+        case .completed:   return Theme.white
+        case .partial:     return .white
+        case .missed:      return Theme.terracotta
+        case .future:      return Theme.primary
+        case .unscheduled: return Theme.textSecondary
         }
     }
 
@@ -201,6 +237,23 @@ struct CalendarView: View {
                 statItem(icon: "checkmark.circle.fill", color: Theme.sage, value: "\(completedCount)", label: "Done")
                 Divider().frame(height: 40)
                 statItem(icon: "percent", color: Theme.primary, value: "\(rate)%", label: "Rate")
+            }
+        }
+    }
+
+    private var allStatsCard: some View {
+        let totalHabits = appState.habits.count
+        let completedToday = appState.habits.filter { appState.isCompleted(habit: $0) }.count
+        let allLogs = appState.habits.flatMap { appState.logsFor(habit: $0, in: displayMonth) }
+        let monthRate = allLogs.isEmpty ? 0 : Int(Double(allLogs.filter { $0.completed }.count) / Double(allLogs.count) * 100)
+
+        return HabitCard {
+            HStack(spacing: 0) {
+                statItem(icon: "list.bullet", color: Theme.softBlue, value: "\(totalHabits)", label: "Habits")
+                Divider().frame(height: 40)
+                statItem(icon: "checkmark.circle.fill", color: Theme.sage, value: "\(completedToday)", label: "Today")
+                Divider().frame(height: 40)
+                statItem(icon: "percent", color: Theme.primary, value: "\(monthRate)%", label: "This Month")
             }
         }
     }
