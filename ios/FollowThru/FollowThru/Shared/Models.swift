@@ -6,6 +6,18 @@ struct User: Identifiable, Codable {
     var username: String
 }
 
+enum HabitCategory: String, Codable, CaseIterable, Hashable {
+    case fitness
+    case study
+    case wellness
+    case reading
+    case sleep
+
+    var displayName: String {
+        rawValue.capitalized
+    }
+}
+
 enum KPIType: String, Codable, CaseIterable {
     case checkbox = "Completion"
     case duration = "Duration (min)"
@@ -13,8 +25,9 @@ enum KPIType: String, Codable, CaseIterable {
 }
 
 struct Habit: Identifiable, Codable, Hashable {
-    var id: String = UUID().uuidString
+    var id: String
     var name: String
+    var category: HabitCategory = .wellness
     var description: String = ""
     var kpiType: KPIType = .checkbox
     var scheduledDays: [Int] = []   // 1 = Sun … 7 = Sat

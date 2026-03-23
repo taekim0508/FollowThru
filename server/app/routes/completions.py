@@ -46,7 +46,15 @@ def complete_habit(
     # (milestone streaks get a distinct post_type due to design)
     create_community_post_from_completion(session, habit, user, completion.completed_date)
 
-    return db_completion
+    return {
+        "id": db_completion.id,
+        "habit_id": db_completion.habit_id,
+        "user_id": db_completion.user_id,
+        "completed_date": db_completion.completed_date,
+        "completed_at": db_completion.completed_at,
+        "quantity_value": db_completion.quantity_value,
+        "note": db_completion.note,
+    }
 
 @router.get("/habits/{habit_id}/completions")
 def list_completions(

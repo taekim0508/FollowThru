@@ -7,23 +7,54 @@ Habit-building app with an iOS client and a FastAPI backend.
 - `ios/FollowThru`: iOS app project
 - `server`: FastAPI backend
 
-## iOS quick start
+## Run the app
 
-1. Open `ios/FollowThru/FollowThru.xcodeproj` in Xcode.
-2. Select scheme `FollowThru`.
-3. Select a simulator (for example, iPhone).
-4. Build with `Cmd+B`.
-5. Run with `Cmd+R`.
+### 1. Start the backend
 
-## Backend quick start
+1. Open `server/.env`
+2. Set your real OpenAI key:
 
-1. `cd server`
-2. `python3 -m venv .venv`
-3. `source .venv/bin/activate`
-4. `pip install -r requirements.txt`
-5. `uvicorn app.main:app --reload --port 8000`
+   ```env
+   OPENAI_API_KEY=sk-...
+   OPENAI_MODEL=gpt-4o-mini
+   ```
+
+3. From the repo root, run:
+
+   ```bash
+   ./run_backend_ai.sh
+   ```
+
+What the script does:
+
+- creates `.venv` if it does not exist
+- installs backend dependencies if they are missing
+- creates `server/.env` from `server/.env.example` if needed
+- forces `AI_PROVIDER=openai`
+- starts the FastAPI backend on `http://127.0.0.1:8000`
 
 Health check:
 
 - `GET http://127.0.0.1:8000/health`
 
+### 2. Run the iOS frontend
+
+1. Open `ios/FollowThru/FollowThru.xcodeproj` in Xcode
+2. Select scheme `FollowThru`
+3. Choose an iPhone simulator
+4. Build with `Cmd+B`
+5. Run with `Cmd+R`
+
+### Backend/frontend connection
+
+- The iOS simulator uses `http://127.0.0.1:8000` by default for the backend.
+- `./run_backend_ai.sh` starts the backend on that same address, so the simulator frontend should connect without extra setup.
+- If you run the app on a physical device instead of a simulator, set `API_BASE_URL` in the Xcode scheme environment to your Mac's LAN IP, for example `http://192.168.1.10:8000`.
+
+## Backend tests
+
+```bash
+source .venv/bin/activate
+python3 -m pip install pytest
+python3 -m pytest server/tests/test_auth.py server/tests/test_habits.py server/tests/test_ai.py
+```

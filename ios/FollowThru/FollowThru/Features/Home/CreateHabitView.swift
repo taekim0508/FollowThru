@@ -6,10 +6,12 @@ struct CreateHabitView: View {
 
     @State private var name = ""
     @State private var description = ""
+    @State private var category: HabitCategory = .wellness
     @State private var kpiType: KPIType = .checkbox
     @State private var selectedDays: Set<Int> = []   // 1=Sun…7=Sat
     @State private var useTime = false
     @State private var scheduledTime = Date()
+    @State private var isSaving = false
 
     private let dayLabels = ["S","M","T","W","T","F","S"]
 
@@ -34,6 +36,15 @@ struct CreateHabitView: View {
                             .background(Theme.white)
                             .cornerRadius(10)
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
+                    }
+
+                    fieldSection("Category") {
+                        Picker("Category", selection: $category) {
+                            ForEach(HabitCategory.allCases, id: \.self) { value in
+                                Text(value.displayName).tag(value)
+                            }
+                        }
+                        .pickerStyle(.menu)
                     }
 
                     // KPI type
@@ -73,6 +84,12 @@ struct CreateHabitView: View {
                                 .labelsHidden()
                         }
                     }
+
+                    if let error = appState.habitsError {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundColor(Theme.terracotta)
+                    }
                 }
                 .padding()
             }
@@ -87,8 +104,8 @@ struct CreateHabitView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") { save() }
                         .fontWeight(.semibold)
-                        .foregroundColor(name.isEmpty ? Theme.textSecondary : Theme.primary)
-                        .disabled(name.isEmpty)
+                        .foregroundColor(name.isEmpty || isSaving ? Theme.textSecondary : Theme.primary)
+                        .disabled(name.isEmpty || isSaving)
                 }
             }
         }
@@ -102,15 +119,23 @@ struct CreateHabitView: View {
     }
 
     private func save() {
-        let habit = Habit(
-            name: name,
-            description: description,
-            kpiType: kpiType,
-            scheduledDays: Array(selectedDays).sorted(),
-            scheduledTime: useTime ? scheduledTime : nil
-        )
-        appState.habits.append(habit)
-        dismiss()
+        isSaving = true
+        Task {
+            let createdHabit = await appState.createHabit(
+                AppHabitDraft(
+                    name: name,
+                    description: description,
+                    category: category,
+                    kpiType: kpiType,
+                    scheduledDays: Array(selectedDays).sorted(),
+                    scheduledTime: useTime ? scheduledTime : nil
+                )
+            )
+            isSaving = false
+            if createdHabit != nil {
+                dismiss()
+            }
+        }
     }
 
     @ViewBuilder
