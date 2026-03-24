@@ -56,6 +56,89 @@ NUMBER_WORDS = {
     "sixty": 60,
 }
 
+_HABIT_KEYWORD_MAP: Dict[str, List[str]] = {
+    "fitness": ["run", "running", "jog", "walk", "work out", "workout", "exercise", "gym", "lift", "yoga", "cycle", "swim", "swimming", "hike", "hiking"],
+    "study": ["study", "learn", "practice coding", "homework", "exam", "class", "course", "read textbook", "flashcard"],
+    "wellness": ["meditate", "meditation", "pray", "prayer", "journal", "journaling", "reflect", "reflection", "mindful", "wellness", "breathe", "breathing"],
+    "reading": ["read", "reading", "book", "pages", "novel", "chapter"],
+    "sleep": ["sleep", "bedtime", "wind down", "wind-down", "go to bed", "night routine", "wake up"],
+}
+
+MAX_RECENT_MESSAGES = 10
+MAX_PLAN_RETRIES = 2
+
+SENSITIVE_KEYWORDS: frozenset = frozenset([
+    "surgery", "injury", "injured", "recovering", "recovery from",
+    "diagnosed", "diagnosis", "chronic condition", "disability",
+    "depressed", "depression", "anxiety disorder", "suicidal", "self-harm", "self harm",
+    "eating disorder", "anorexia", "bulimia",
+    "addiction", "alcoholic",
+    "500 calories", "400 calories", "300 calories",
+])
+
+OFF_TOPIC_PHRASES: frozenset = frozenset([
+    "write code", "debug this", "fix my code", "write a function",
+    "what is the weather", "will it rain", "temperature outside",
+    "capital of", "who invented", "what year was",
+    "movie recommendation", "tv show recommendation", "what should i watch",
+    "order pizza", "best restaurant", "recommend a restaurant",
+    "tell me a joke", "write me a poem", "translate this",
+    "stock price", "cryptocurrency",
+])
+
+MULTI_HABIT_PATTERNS: List = [
+    re.compile(r"\band\s+(?:also\s+)?(?:i\s+(?:also\s+)?want|i\s+also|want\s+to)\b", re.IGNORECASE),
+    re.compile(r"\bas\s+well\s+as\b", re.IGNORECASE),
+    re.compile(r"\bin\s+addition\b", re.IGNORECASE),
+    re.compile(r"\balso\s+(?:want|plan|trying)\b", re.IGNORECASE),
+]
+
+REALISM_CAPS: Dict[str, Dict[str, Dict[str, int]]] = {
+    "fitness": {
+        "beginner":     {"max_duration_minutes": 60,  "max_days_per_week": 5},
+        "intermediate": {"max_duration_minutes": 90,  "max_days_per_week": 6},
+        "advanced":     {"max_duration_minutes": 180, "max_days_per_week": 7},
+    },
+    "study": {
+        "beginner":     {"max_duration_minutes": 90,  "max_days_per_week": 7},
+        "intermediate": {"max_duration_minutes": 180, "max_days_per_week": 7},
+        "advanced":     {"max_duration_minutes": 240, "max_days_per_week": 7},
+    },
+    "wellness": {
+        "beginner":     {"max_duration_minutes": 60,  "max_days_per_week": 7},
+        "intermediate": {"max_duration_minutes": 90,  "max_days_per_week": 7},
+        "advanced":     {"max_duration_minutes": 120, "max_days_per_week": 7},
+    },
+    "reading": {
+        "beginner":     {"max_duration_minutes": 90,  "max_days_per_week": 7},
+        "intermediate": {"max_duration_minutes": 120, "max_days_per_week": 7},
+        "advanced":     {"max_duration_minutes": 180, "max_days_per_week": 7},
+    },
+    "sleep": {
+        "beginner":     {"max_duration_minutes": 60, "max_days_per_week": 7},
+        "intermediate": {"max_duration_minutes": 60, "max_days_per_week": 7},
+        "advanced":     {"max_duration_minutes": 90, "max_days_per_week": 7},
+    },
+}
+
+# When experience level + category are known, these are sensible starting defaults
+# for frequency (days/week) to infer when frequency is not yet specified
+EXPERIENCE_FREQUENCY_DEFAULTS: Dict[str, Dict[str, int]] = {
+    "fitness":  {"beginner": 3, "intermediate": 4, "advanced": 5},
+    "study":    {"beginner": 5, "intermediate": 5, "advanced": 6},
+    "wellness": {"beginner": 7, "intermediate": 7, "advanced": 7},
+    "reading":  {"beginner": 5, "intermediate": 6, "advanced": 7},
+    "sleep":    {"beginner": 7, "intermediate": 7, "advanced": 7},
+}
+
+EXPERIENCE_DURATION_DEFAULTS: Dict[str, Dict[str, int]] = {
+    "fitness":  {"beginner": 20, "intermediate": 30, "advanced": 45},
+    "study":    {"beginner": 25, "intermediate": 45, "advanced": 60},
+    "wellness": {"beginner": 10, "intermediate": 15, "advanced": 20},
+    "reading":  {"beginner": 15, "intermediate": 20, "advanced": 30},
+    "sleep":    {"beginner": 15, "intermediate": 20, "advanced": 30},
+}
+
 
 class AIPipelineError(Exception):
     pass
@@ -123,6 +206,8 @@ class IntakeStepResult:
     ready_for_confirmation: bool
     confirmation_summary: Optional[str]
     needs_clarification: bool
+    intent: str = "on_topic"
+    realism_warning: Optional[str] = None
 
 
 @dataclass
@@ -132,6 +217,14 @@ class RevisionResult:
     model: str
     plan_tweak: Optional[GeneratedHabitPlan] = None
     reopen_intake: Optional[IntakeStepResult] = None
+
+
+@dataclass
+class RealistCheckResult:
+    is_realistic: bool
+    warning_message: Optional[str]
+    suggested_duration_minutes: Optional[int] = None
+    suggested_days_per_week: Optional[int] = None
 
 
 def _provider_and_model() -> tuple[str, str]:
@@ -187,14 +280,7 @@ def _normalize_experience_level(value: Any) -> Optional[str]:
 
 def _infer_category_from_text(text: str) -> tuple[Optional[str], bool]:
     lowered = text.lower()
-    keyword_map = {
-        "fitness": ["run", "running", "jog", "walk", "work out", "workout", "exercise", "gym", "lift", "yoga", "cycle"],
-        "study": ["study", "learn", "practice coding", "homework", "exam", "class", "course"],
-        "wellness": ["meditate", "meditation", "pray", "prayer", "journal", "journaling", "reflect", "reflection", "mindful", "wellness"],
-        "reading": ["read", "reading", "book", "pages", "novel"],
-        "sleep": ["sleep", "bedtime", "wind down", "wind-down", "go to bed", "night routine"],
-    }
-    matches = [category for category, keywords in keyword_map.items() if any(keyword in lowered for keyword in keywords)]
+    matches = [cat for cat, keywords in _HABIT_KEYWORD_MAP.items() if any(kw in lowered for kw in keywords)]
     if len(matches) == 1:
         return matches[0], True
     if matches:
@@ -364,6 +450,191 @@ def _duration_minutes_from_text(value: Any) -> Optional[int]:
     return None
 
 
+def classify_intent_mock(message: str) -> str:
+    """Rule-based intent classification for use in mock/test mode."""
+    lowered = message.lower()
+
+    if any(kw in lowered for kw in SENSITIVE_KEYWORDS):
+        return "sensitive"
+
+    if any(phrase in lowered for phrase in OFF_TOPIC_PHRASES):
+        return "off_topic"
+
+    # Multi-habit: conjunction present AND multiple distinct habit categories hit
+    if any(pat.search(lowered) for pat in MULTI_HABIT_PATTERNS):
+        cat_hits = sum(1 for kws in _HABIT_KEYWORD_MAP.values() if any(kw in lowered for kw in kws))
+        if cat_hits >= 2:
+            return "multi_habit"
+
+    return "on_topic"
+
+
+def classify_intent_openai(message: str, recent_messages: Sequence[AIChatMessage], model: str) -> str:
+    """LLM-based intent classification. Falls back to on_topic on any error."""
+    history = [
+        {"role": m.role, "content": m.content}
+        for m in recent_messages[-4:]
+        if m.content.strip()
+    ]
+    prompt = (
+        f'Classify this user message in a habit coaching app.\n\nMessage: "{message}"\n\n'
+        'Return ONLY valid JSON: {"intent": "<label>"}\n\n'
+        "Labels:\n"
+        "- on_topic: discussing a habit to build (including emotional/motivational context)\n"
+        "- off_topic: completely unrelated to habits or self-improvement\n"
+        "- sensitive: mentions medical conditions, injury recovery, mental health concerns, "
+        "eating disorders, or substance abuse\n"
+        "- multi_habit: user mentions 2 or more distinct habits they want to build simultaneously"
+    )
+    try:
+        result = _call_openai_messages_for_json(
+            messages=[
+                {"role": "system", "content": "Classify user intent and return JSON only."},
+                *history,
+                {"role": "user", "content": prompt},
+            ],
+            model=model,
+        )
+        intent = str(result.get("intent", "on_topic")).lower()
+        return intent if intent in {"on_topic", "off_topic", "sensitive", "multi_habit"} else "on_topic"
+    except Exception:
+        return "on_topic"
+
+
+def classify_intent(message: str, recent_messages: Sequence[AIChatMessage]) -> str:
+    """Classify the intent of a user message. Returns one of: on_topic, off_topic, sensitive, multi_habit."""
+    provider, model = _provider_and_model()
+    if provider == "mock":
+        return classify_intent_mock(message)
+    if provider == "openai":
+        return classify_intent_openai(message, recent_messages, model)
+    return "on_topic"
+
+
+def check_realism(draft: "AIIntakeDraft") -> RealistCheckResult:
+    """Rule-based realism check. Returns a warning if the draft contains an unrealistic goal."""
+    exp = draft.experience_level
+    cat = draft.category
+    if not exp or not cat or exp not in VALID_EXPERIENCE_LEVELS or cat not in REALISM_CAPS:
+        return RealistCheckResult(is_realistic=True, warning_message=None)
+
+    caps = REALISM_CAPS[cat][exp]
+    max_duration = caps["max_duration_minutes"]
+    max_days = caps["max_days_per_week"]
+
+    issues: List[str] = []
+    suggested_duration: Optional[int] = None
+    suggested_days: Optional[int] = None
+
+    if draft.duration_minutes and draft.duration_minutes > max_duration:
+        suggested_duration = max_duration
+        issues.append(f"sessions of {draft.duration_minutes} minutes")
+
+    days_count = len(draft.schedule_days) if draft.schedule_days else None
+    if days_count and days_count > max_days:
+        suggested_days = max_days
+        issues.append(f"{days_count} days per week")
+
+    if not issues:
+        return RealistCheckResult(is_realistic=True, warning_message=None)
+
+    issue_text = " and ".join(issues)
+    parts = [f"That's ambitious! {issue_text.capitalize()} can be a lot to start with as a {exp}."]
+    suggestions: List[str] = []
+    if suggested_duration:
+        suggestions.append(f"sessions up to {suggested_duration} minutes")
+    if suggested_days:
+        suggestions.append(f"{suggested_days} days per week")
+    if suggestions:
+        parts.append(f"I'd suggest starting with {' and '.join(suggestions)} to build consistency first.")
+    parts.append("Want me to keep your original goal, or adjust it to something more manageable?")
+
+    return RealistCheckResult(
+        is_realistic=False,
+        warning_message=" ".join(parts),
+        suggested_duration_minutes=suggested_duration,
+        suggested_days_per_week=suggested_days,
+    )
+
+
+def _infer_defaults_from_experience(draft: "AIIntakeDraft") -> "AIIntakeDraft":
+    """
+    When both experience level and category are known, fill in sensible frequency/duration
+    defaults for any fields that are still missing. This reduces the number of clarifying
+    questions the user has to answer.
+    """
+    exp = draft.experience_level
+    cat = draft.category
+    if not exp or not cat or exp not in VALID_EXPERIENCE_LEVELS or cat not in EXPERIENCE_FREQUENCY_DEFAULTS:
+        return draft
+
+    duration = draft.duration_minutes
+    schedule_days = list(draft.schedule_days or [])
+    frequency = draft.frequency
+    schedule_text = draft.schedule_text
+
+    changed = False
+
+    # Fill in duration if missing
+    if not duration:
+        duration = EXPERIENCE_DURATION_DEFAULTS[cat][exp]
+        changed = True
+
+    # Fill in frequency/schedule if both are missing
+    if not frequency and not schedule_days:
+        days_count = EXPERIENCE_FREQUENCY_DEFAULTS[cat][exp]
+        day_sets: Dict[int, List[str]] = {
+            3: ["monday", "wednesday", "friday"],
+            4: ["monday", "tuesday", "thursday", "friday"],
+            5: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+            6: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"],
+            7: list(ORDERED_DAYS),
+        }
+        schedule_days = day_sets.get(days_count, ["monday", "wednesday", "friday"])
+        frequency = "every day" if days_count == 7 else f"{days_count} times per week"
+        schedule_text = _schedule_text_from_days(schedule_days)
+        changed = True
+
+    if not changed:
+        return draft
+
+    return AIIntakeDraft(
+        goal_summary=draft.goal_summary,
+        habit_description=draft.habit_description,
+        frequency=frequency,
+        schedule_text=schedule_text,
+        schedule_days=schedule_days,
+        duration_minutes=duration,
+        experience_level=draft.experience_level,
+        category=draft.category,
+        preferred_time=draft.preferred_time,
+        available_time=draft.available_time,
+    )
+
+
+def _validate_plan_fields(plan: HabitPlanLLMOutput) -> List[str]:
+    """Validate a generated plan and return a list of error strings (empty = valid)."""
+    errors: List[str] = []
+    if not (plan.habit_name or "").strip():
+        errors.append("habit_name is empty")
+    if not TIME_RE.match(plan.trigger_value or ""):
+        errors.append(f"trigger_value '{plan.trigger_value}' is not valid HH:MM format")
+    freq_type = (plan.frequency_type or "").lower()
+    if freq_type not in {"daily", "custom"}:
+        errors.append(f"frequency_type '{plan.frequency_type}' must be 'daily' or 'custom'")
+    if freq_type == "custom":
+        days = (plan.frequency_pattern or {}).get("days")
+        if not isinstance(days, list) or not days:
+            errors.append("frequency_pattern.days must be a non-empty list when frequency_type is 'custom'")
+        elif not all(isinstance(d, str) and d.lower() in VALID_DAYS for d in days):
+            errors.append("frequency_pattern.days contains invalid day names")
+    if not (plan.motivation_statement or "").strip():
+        errors.append("motivation_statement is empty")
+    if not plan.progressions:
+        errors.append("progressions must have at least one step")
+    return errors
+
+
 def _build_prompt(user_goal: str, category: str, context: Optional[dict]) -> str:
     ctx = _normalize_context(context)
     exp = ctx.get("experience_level", "beginner")
@@ -426,11 +697,15 @@ Return ONLY valid JSON (no markdown, no prose) with this shape:
 }}
 
 Rules:
-- Start small for the user's experience level.
-- Respect available time.
-- The desired frequency, if provided, takes priority over inferring cadence from the goal.
+- Do not promise specific outcomes (weight loss, performance gains, etc.).
+- Do not cite specific statistics or research studies.
+- Start small for the user's experience level:
+  * beginner: 2-3 sessions per week, 15-25 minutes each.
+  * intermediate: 3-4 sessions per week, 25-40 minutes each.
+  * advanced: 4-5 sessions per week, 40-60 minutes each.
+- The desired frequency and duration, if provided, take priority over these defaults.
 - Respect the desired schedule and duration if they are provided.
-- Progressions should stay advisory and realistic.
+- Progressions should increase gradually — each step must be harder than the previous.
 - If preferred_time is morning/afternoon/evening, choose an appropriate time.
 - trigger_type must be "time".
 """.strip()
@@ -655,28 +930,49 @@ def _generate_plan(prompt: str, user_goal: str, category: str, context: Optional
         raise AIPipelineError(f"Unsupported category '{category}'")
 
     provider, model = _provider_and_model()
-    if provider == "mock":
-        raw_plan = _mock_plan_json(user_goal=user_goal, category=category, context=context)
-    elif provider == "openai":
-        raw_plan = _call_openai_for_json(prompt=prompt, model=model)
-    else:
-        raise AIPipelineConfigError(f"Unsupported AI_PROVIDER '{provider}'")
+    last_validation_errors: Optional[str] = None
 
-    try:
-        plan = HabitPlanLLMOutput.model_validate(raw_plan)
-    except Exception as exc:
-        raise AIPipelineGenerationError(f"LLM JSON did not match expected shape: {exc}") from exc
+    for attempt in range(MAX_PLAN_RETRIES + 1):
+        if provider == "mock":
+            raw_plan = _mock_plan_json(user_goal=user_goal, category=category, context=context)
+        elif provider == "openai":
+            retry_prompt = prompt
+            if last_validation_errors and attempt > 0:
+                retry_prompt = f"{prompt}\n\nPrevious attempt had validation errors — fix them:\n{last_validation_errors}"
+            raw_plan = _call_openai_for_json(prompt=retry_prompt, model=model)
+        else:
+            raise AIPipelineConfigError(f"Unsupported AI_PROVIDER '{provider}'")
 
-    plan = _normalize_llm_output(plan, requested_category=category, user_goal=user_goal, context=context)
-    habit_payload = _to_habit_create(plan)
+        try:
+            plan = HabitPlanLLMOutput.model_validate(raw_plan)
+        except Exception as exc:
+            last_validation_errors = str(exc)
+            if attempt == MAX_PLAN_RETRIES:
+                raise AIPipelineGenerationError(f"LLM JSON did not match expected shape: {exc}") from exc
+            continue
 
-    return GeneratedHabitPlan(
-        habit_payload=habit_payload,
-        progressions=[step.model_dump() for step in plan.progressions],
-        raw_plan=plan.model_dump(),
-        provider=provider,
-        model=model,
-    )
+        plan = _normalize_llm_output(plan, requested_category=category, user_goal=user_goal, context=context)
+        field_errors = _validate_plan_fields(plan)
+        if field_errors:
+            last_validation_errors = "; ".join(field_errors)
+            if attempt < MAX_PLAN_RETRIES and provider == "openai":
+                continue
+            # On final attempt or mock mode: fall back to mock plan rather than raising
+            if provider == "openai":
+                raw_plan = _mock_plan_json(user_goal=user_goal, category=category, context=context)
+                plan = HabitPlanLLMOutput.model_validate(raw_plan)
+                plan = _normalize_llm_output(plan, requested_category=category, user_goal=user_goal, context=context)
+
+        habit_payload = _to_habit_create(plan)
+        return GeneratedHabitPlan(
+            habit_payload=habit_payload,
+            progressions=[step.model_dump() for step in plan.progressions],
+            raw_plan=plan.model_dump(),
+            provider=provider,
+            model=model,
+        )
+
+    raise AIPipelineGenerationError("Plan generation failed after maximum retries")
 
 
 def generate_habit_plan(user_goal: str, category: str, context: Optional[dict] = None) -> GeneratedHabitPlan:
@@ -982,9 +1278,73 @@ def process_intake_step(
     current_draft: Optional[AIIntakeDraft],
     latest_user_message: str,
 ) -> IntakeStepResult:
+    # 1. Cap context window — never process more than MAX_RECENT_MESSAGES
+    capped_messages = list(recent_messages[-MAX_RECENT_MESSAGES:])
+
+    # 2. Classify intent of the latest message
+    intent = classify_intent(latest_user_message, capped_messages)
+
     base_draft = _validated_draft(current_draft or AIIntakeDraft())
-    extraction = _extract_intake_update(recent_messages=recent_messages, current_draft=base_draft, latest_user_message=latest_user_message)
+
+    # 3. Handle intents that bypass normal intake flow
+    if intent == "off_topic":
+        return IntakeStepResult(
+            assistant_message=(
+                "I’m here to help you build habits! Let’s get back on track. "
+                "What habit are you thinking of working on?"
+            ),
+            updated_draft=base_draft,
+            missing_fields=missing_fields_for_draft(base_draft),
+            ready_for_confirmation=False,
+            confirmation_summary=None,
+            needs_clarification=False,
+            intent=intent,
+        )
+
+    if intent == "sensitive":
+        return IntakeStepResult(
+            assistant_message=(
+                "It sounds like you may be dealing with something that deserves proper support. "
+                "I’d recommend speaking with a doctor or therapist for personalized guidance. "
+                "I’m best suited for everyday habit-building — let me know if there’s a "
+                "different habit you’d like to explore."
+            ),
+            updated_draft=base_draft,
+            missing_fields=missing_fields_for_draft(base_draft),
+            ready_for_confirmation=False,
+            confirmation_summary=None,
+            needs_clarification=False,
+            intent=intent,
+        )
+
+    if intent == "multi_habit":
+        return IntakeStepResult(
+            assistant_message=(
+                "It sounds like you have a few habits in mind — that’s great! "
+                "Let’s focus on one to start so we can build a solid plan. "
+                "Which one matters most to you right now?"
+            ),
+            updated_draft=base_draft,
+            missing_fields=missing_fields_for_draft(base_draft),
+            ready_for_confirmation=False,
+            confirmation_summary=None,
+            needs_clarification=False,
+            intent=intent,
+        )
+
+    # 4. Normal intake flow
+    extraction = _extract_intake_update(
+        recent_messages=capped_messages,
+        current_draft=base_draft,
+        latest_user_message=latest_user_message,
+    )
     updated_draft = _merged_draft(base_draft, extraction=extraction, latest_user_message=latest_user_message)
+
+    # 5. Infer frequency/duration defaults from experience + category when fields are missing
+    updated_draft = _infer_defaults_from_experience(updated_draft)
+
+    # 6. Realism check
+    realism_result = check_realism(updated_draft)
 
     missing_fields = missing_fields_for_draft(updated_draft)
     ready_for_confirmation = not missing_fields
@@ -996,12 +1356,19 @@ def process_intake_step(
     )
     needs_clarification = bool(latest_user_message.strip()) and not required_field_changed and not ready_for_confirmation
 
+    # 7. Build assistant message
     if ready_for_confirmation:
-        assistant_message = f"{confirmation_summary}\n\nIf that looks right, confirm and I’ll generate your plan."
+        base_message = f"{confirmation_summary}\n\nIf that looks right, confirm and I’ll generate your plan."
     elif needs_clarification:
-        assistant_message = f"I still need one more detail. {_next_question(missing_fields)}"
+        base_message = f"I still need one more detail. {_next_question(missing_fields)}"
     else:
-        assistant_message = _next_question(missing_fields)
+        base_message = _next_question(missing_fields)
+
+    # Prepend realism warning when applicable
+    if not realism_result.is_realistic:
+        assistant_message = f"{realism_result.warning_message}\n\n{base_message}"
+    else:
+        assistant_message = base_message
 
     return IntakeStepResult(
         assistant_message=assistant_message,
@@ -1010,6 +1377,8 @@ def process_intake_step(
         ready_for_confirmation=ready_for_confirmation,
         confirmation_summary=confirmation_summary,
         needs_clarification=needs_clarification,
+        intent=intent,
+        realism_warning=realism_result.warning_message if not realism_result.is_realistic else None,
     )
 
 

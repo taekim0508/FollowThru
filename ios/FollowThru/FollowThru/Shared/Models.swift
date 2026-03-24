@@ -16,6 +16,16 @@ enum HabitCategory: String, Codable, CaseIterable, Hashable {
     var displayName: String {
         rawValue.capitalized
     }
+
+    var sfSymbol: String {
+        switch self {
+        case .fitness:  return "figure.run"
+        case .study:    return "book.closed"
+        case .wellness: return "leaf"
+        case .reading:  return "text.book.closed"
+        case .sleep:    return "moon"
+        }
+    }
 }
 
 enum KPIType: String, Codable, CaseIterable {
