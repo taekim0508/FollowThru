@@ -29,12 +29,13 @@ struct MainTabView: View {
             AIChatView()
                 .tabItem { Label("AI", systemImage: "sparkles") }
 
+            
+            CommunityView()
+                .tabItem { Label("Community", systemImage: "person.2") }
+            
+            // moved progress tab up one, so it is in the same supertab as profile ("... more")
             ProgressShellView()
                 .tabItem { Label("Progress", systemImage: "chart.bar") }
-
-            /* Commented out for cleaner look for now. iOS only allows 5 tabs; decisions to be made here*/
-            //CommunityView()
-                //.tabItem { Label("Community", systemImage: "person.2") }
 
             ProfileView()
                 .tabItem { Label("Profile", systemImage: "person") }
