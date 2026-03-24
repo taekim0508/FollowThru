@@ -68,6 +68,16 @@ class Habit(SQLModel, table=True):
     motivation_statement: Optional[str] = None
     status: str = Field(default="active", max_length=20)
 
+    # new: streak tracking
+
+    # current_streak: number of consecutive scheduled days completed
+    current_streak: int = Field(default=0)
+    # max_streak: lifetime best streak — never resets
+    max_streak: int = Field(default=0)
+    # streak_last_updated: the completion date last counted toward streak
+    # used to determine if streak is still active or broken
+    streak_last_updated: Optional[date] = Field(default=None)
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     started_at: Optional[date] = None
     updated_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"onupdate": datetime.utcnow})
@@ -128,17 +138,37 @@ class HabitCreate(BaseModel):
     name: str
     category: str
     description: str
+
+    # trigger_type: what initiates the habit reminder ("time" = time-based, "location" = geofence-based)
+    # trigger_value: the actual trigger value — for time-based habits this is "HH:MM" (e.g. "07:00")
     trigger_type: str = "time"
     trigger_value: str
-    frequency_type: str
-    frequency_pattern: Optional[dict] = None
 
-    habit_type: str = "binary"   # binary or tracked
+    # deprecated — kept for backwards compatibility with existing API callers, not used in logic
+    frequency_type: str = Field(default="custom", max_length=20)
+
+    # source of truth for scheduling — {"days": ["monday", "tuesday"...]}
+    # always present, always a full list of selected days (1-7 days). all 7 days = every day.
+    frequency_pattern: dict
+
+    # "binary" = checkbox (did it or not)
+    # "tracked" = numeric target (duration in minutes or count of something)
+    habit_type: str = "binary"
+
+    # numeric goal for tracked habits (e.g. 30 for "30 minutes", 10 for "10 reps")
+    # null for binary habits
     target_value: Optional[float] = None
 
-    requires_quantity: bool = False
+    # display label for target_value (e.g. "minutes", "pages", "reps")
+    # null for binary habits
     quantity_unit: Optional[str] = None
+
+    # deprecated — notes always allowed, kept for API compatibility
     allows_notes: bool = True
+
+    # deprecated — redundant with habit_type=="tracked", kept for API compatibility
+    requires_quantity: bool = False
+
     motivation_statement: Optional[str] = None
 
 
@@ -146,12 +176,18 @@ class HabitUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     trigger_value: Optional[str] = None
+
+    # deprecated — not used in logic, kept for API compatibility
     frequency_type: Optional[str] = None
+
+    # update the scheduled days — {"days": ["monday"...]}
     frequency_pattern: Optional[dict] = None
 
     habit_type: Optional[str] = None
     target_value: Optional[float] = None
     quantity_unit: Optional[str] = None
+
+    # deprecated — kept for API compatibility
     requires_quantity: Optional[bool] = None
 
     status: Optional[str] = None

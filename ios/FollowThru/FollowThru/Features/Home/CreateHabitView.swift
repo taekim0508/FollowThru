@@ -65,15 +65,16 @@ struct CreateHabitView: View {
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         } else if kpiType == .count {
                             HStack {
+                                Text("Count: ")
+                                    .foregroundColor(Theme.textSecondary)
+                                    .fontWeight(.semibold)
                                 TextField("e.g. 10", text: $kpiAmountTarget)
                                     .keyboardType(.numberPad)
                                     .padding(12)
                                     .background(Theme.white)
                                     .cornerRadius(10)
                                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
-                                Text("times")
-                                    .foregroundColor(Theme.textSecondary)
-                                    .fontWeight(.semibold)
+                                
                             }
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         }
@@ -162,6 +163,11 @@ struct CreateHabitView: View {
                 .font(.subheadline).fontWeight(.semibold)
                 .foregroundColor(Theme.primary)
             content()
+            
+            // Add lines in between sections for better ui
+            Divider()
+                .background(Color.black.opacity(0.3))
+                .padding(.top, 10)
         }
     }
 }
