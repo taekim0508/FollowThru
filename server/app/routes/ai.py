@@ -58,6 +58,8 @@ class AIIntakeResponse(BaseModel):
     ready_for_confirmation: bool
     confirmation_summary: Optional[str]
     needs_clarification: bool
+    intent: str = "on_topic"
+    realism_warning: Optional[str] = None
 
 
 class AIPlanSnapshotResponse(BaseModel):
@@ -122,6 +124,8 @@ def _intake_response(result) -> AIIntakeResponse:
         ready_for_confirmation=result.ready_for_confirmation,
         confirmation_summary=result.confirmation_summary,
         needs_clarification=result.needs_clarification,
+        intent=result.intent,
+        realism_warning=result.realism_warning,
     )
 
 
