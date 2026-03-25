@@ -19,6 +19,11 @@ final class AppState: ObservableObject {
     // MARK: - Completion Modal
     @Published var selectedHabit: Habit? = nil
 
+    // MARK: - AI
+    @Published var isAILoading: Bool = false
+    @Published var aiError: String? = nil
+    @Published var latestAIPlan: AIPlanPreview? = nil
+
     // MARK: - Community
     @Published var communityFeed: [FeedPost] = []
     @Published var friendInbox: [FriendInboxItem] = []
@@ -97,6 +102,8 @@ final class AppState: ObservableObject {
         userSearchResults = []
         communityError = nil
         habitsError = nil
+        aiError = nil
+        latestAIPlan = nil
     }
 
     func updateAccount(
@@ -398,5 +405,106 @@ final class AppState: ObservableObject {
         } catch {
             communityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    // MARK: - AI
+
+    @discardableResult
+    func submitAIIntake(
+        recentMessages: [AIConversationMessage],
+        currentDraft: AIIntakeDraftDTO,
+        latestUserMessage: String
+    ) async -> AIIntakeResponseDTO? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            return try await AIAPI.intake(
+                AIIntakeRequestDTO(
+                    recentMessages: recentMessages.map { $0.toDTO() },
+                    currentDraft: currentDraft,
+                    latestUserMessage: latestUserMessage
+                )
+            )
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func requestAIPlan(from draft: AIIntakeDraftDTO) async -> AIPlanPreview? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            let response = try await AIAPI.generatePlan(from: draft)
+            let preview = response.habitPayload.toAIPlanPreview(
+                provider: response.provider,
+                model: response.model,
+                progressions: response.progressions
+            )
+            latestAIPlan = preview
+            return preview
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func createHabitFromAI(draft: AIIntakeDraftDTO) async -> AICreatedHabitDTO? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            let response = try await AIAPI.generateAndCreate(from: draft)
+            latestAIPlan = response.habitPayload.toAIPlanPreview(
+                provider: response.provider,
+                model: response.model,
+                progressions: response.progressions
+            )
+            _ = await refreshHabits()
+            return response.habit
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func reviseAIPlan(
+        draft: AIIntakeDraftDTO,
+        currentPlan: AIPlanPreview,
+        critique: String,
+        recentMessages: [AIConversationMessage]
+    ) async -> AIRevisePlanResponseDTO? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            let response = try await AIAPI.revisePlan(
+                AIRevisePlanRequestDTO(
+                    draft: draft,
+                    currentPlan: currentPlan.toSnapshotDTO(),
+                    critique: critique,
+                    recentMessages: recentMessages.map { $0.toDTO() }
+                )
+            )
+            if let planTweak = response.planTweak {
+                latestAIPlan = planTweak.toAIPlanPreview()
+            }
+            return response
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
+    private func errorMessage(from error: Error) -> String {
+        if let localized = error as? LocalizedError, let message = localized.errorDescription {
+            return message
+        }
+        return error.localizedDescription
     }
 }
