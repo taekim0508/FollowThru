@@ -32,7 +32,7 @@ def test_create_habit_success(client):
     assert r.status_code == 201
     body = r.json()
     assert body["name"] == "Morning Run"
-    assert body["category"] == "fitness"
+    assert body["category"] == "Fitness"
 
 
 def test_create_habit_requires_auth(client):
