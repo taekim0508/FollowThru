@@ -27,22 +27,39 @@ extension Color {
 }
 
 struct Theme {
-    // Mapped from tailwind HSL variables in index.css and converted to hex
-    static let primary = Color(hex: "2B3D4F")    // deep navy
-    static let softBlue = Color(hex: "8FA4B7")   // light blue backgrounds
-    static let terracotta = Color(hex: "C57553") // accent/warning
-    static let sage = Color(hex: "70957C")      // sage green
-    static let sageLight = Color(hex: "F3F6F4") // very light sage
-    static let beige = Color(hex: "F5F1EB")     // warm beige
-    static let offWhite = Color(hex: "FBFAF9")  // off-white
-    static let lightGray = Color(hex: "E8E8E8") // neutral light gray
-    
-    // Added tokens
-    static let textSecondary = Color(hex: "65758B") // slate gray (approx of hsl(215,16%,47%))
-    static let background = Theme.offWhite
-    static let cardBackground = Theme.beige
+    // MARK: – Brand / Interactive
+    // Used for: primary buttons, user chat bubbles, active tab icons, links
+    static let primary      = Color(hex: "445E3E")  // dark sage green
 
-    // Convenience tokens
-    static let white = Color.white
-    static let shadow = Color.black.opacity(0.08)
+    // MARK: – Sage Scale
+    // Used for: icons, streaks, progress fills, checkmarks, accents
+    static let sage         = Color(hex: "6B9462")  // medium sage
+    static let sageLight    = Color(hex: "E6EDE4")  // very light sage tint (icon backgrounds, tags)
+
+    // MARK: – Backgrounds & Surfaces
+    static let background   = Color(hex: "F7F5F0")  // warm cream page background
+    static let offWhite     = Color(hex: "F7F5F0")  // alias kept for legacy callsites
+    static let cardBeige    = Color(hex: "EDEAE3")  // warm beige (category cards, AI assistant bubbles)
+    static let beige        = Color(hex: "EDEAE3")  // alias
+    static let cardBackground = Color(hex: "EDEAE3")
+
+    // MARK: – Text
+    // primary (above) doubles as the primary text color (dark sage reads as near-black charcoal)
+    static let textSecondary = Color(hex: "6B7267")  // body / secondary text
+    static let textTertiary  = Color(hex: "9AA396")  // section labels, timestamps, captions
+
+    // MARK: – Borders & Dividers
+    static let lightGray    = Color(hex: "E2DDD6")  // warm gray border / divider
+    static let border       = Color(hex: "E2DDD6")  // alias
+
+    // MARK: – Feedback
+    static let terracotta   = Color(hex: "C57553")  // warning / error
+    static let success      = Color(hex: "5B8655")  // success green (same family as sage)
+
+    // MARK: – Utility
+    static let white        = Color.white
+    static let shadow       = Color.black.opacity(0.06)
+
+    // MARK: – Legacy aliases (kept so unchanged views compile without edits)
+    static let softBlue     = Color(hex: "E6EDE4")  // remapped to sageLight
 }

@@ -87,6 +87,61 @@ struct AIIntakeResponseDTO: Decodable, Hashable {
     let needsClarification: Bool
 }
 
+// MARK: - Habit Proposal / Candidate DTOs (two-variant proposal flow)
+
+struct AIHabitProposalRequestDTO: Codable, Hashable {
+    let recentMessages: [AIConversationMessageDTO]
+    let latestUserMessage: String
+}
+
+struct AIHabitCandidateDTO: Codable, Hashable, Identifiable {
+    let id = UUID()
+    let title: String
+    let category: String          // "fitness" | "wellness" | "study" | "reading" | "sleep"
+    let description: String
+    let suggestedSchedule: String
+    let durationMinutes: Int
+    let rationale: String
+    let variant: String           // "balanced" | "ambitious"
+    let habitPayload: HabitCreateRequestDTO
+    let progressions: [AIProgressionDTO]
+
+    private enum CodingKeys: String, CodingKey {
+        case title, category, description, suggestedSchedule
+        case durationMinutes, rationale, variant, habitPayload, progressions
+    }
+}
+
+struct AIHabitProposalResponseDTO: Decodable, Hashable {
+    let success: Bool
+    let provider: String
+    let model: String
+    let action: String            // "clarify" | "propose" | "off_topic" | "sensitive"
+    let assistantMessage: String
+    let whatIHeard: String?
+    let candidates: [AIHabitCandidateDTO]
+    let needsClarification: Bool
+}
+
+struct AIRefineCandidateRequestDTO: Codable, Hashable {
+    let idea: String
+    let selectedCandidate: AIHabitCandidateDTO
+    let refinement: String
+    let recentMessages: [AIConversationMessageDTO]
+}
+
+struct AIRefineCandidateResponseDTO: Decodable, Hashable {
+    let success: Bool
+    let provider: String
+    let model: String
+    let assistantMessage: String
+    let candidate: AIHabitCandidateDTO
+}
+
+struct AICreateCandidateRequestDTO: Codable, Hashable {
+    let candidate: AIHabitCandidateDTO
+}
+
 // MARK: - Generate / Plan DTOs
 
 struct AIGenerateRequestDTO: Codable, Hashable {

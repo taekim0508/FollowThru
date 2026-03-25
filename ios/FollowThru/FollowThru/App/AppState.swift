@@ -24,6 +24,69 @@ final class AppState: ObservableObject {
     @Published var aiError: String? = nil
     @Published var latestAIPlan: AIPlanPreview? = nil
 
+    @discardableResult
+    func requestAIHabitProposals(
+        recentMessages: [AIConversationMessage],
+        latestUserMessage: String
+    ) async -> AIHabitProposalResponseDTO? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            return try await AIAPI.proposeHabits(
+                AIHabitProposalRequestDTO(
+                    recentMessages: recentMessages.map { $0.toDTO() },
+                    latestUserMessage: latestUserMessage
+                )
+            )
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func refineAICandidate(
+        idea: String,
+        selectedCandidate: AIHabitCandidateDTO,
+        refinement: String,
+        recentMessages: [AIConversationMessage]
+    ) async -> AIRefineCandidateResponseDTO? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            return try await AIAPI.refineCandidate(
+                AIRefineCandidateRequestDTO(
+                    idea: idea,
+                    selectedCandidate: selectedCandidate,
+                    refinement: refinement,
+                    recentMessages: recentMessages.map { $0.toDTO() }
+                )
+            )
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func createHabitFromAI(candidate: AIHabitCandidateDTO) async -> Habit? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            let response = try await AIAPI.createCandidate(
+                AICreateCandidateRequestDTO(candidate: candidate)
+            )
+            await loadHabits()
+            return habits.first { $0.id == response.habit.id }
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
     // MARK: - Community
     @Published var communityFeed: [FeedPost] = []
     @Published var friendInbox: [FriendInboxItem] = []
