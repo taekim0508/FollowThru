@@ -121,7 +121,38 @@ def create_habit(
     session.add(db_habit)
     session.commit()
     session.refresh(db_habit)
-    return db_habit
+    # return full enriched response instead of raw SQLModel object
+    return _build_habit_response(session, db_habit, date.today())
+
+
+@router.put("/{habit_id}")
+def update_habit(
+        habit_id: int,
+        habit_update: HabitUpdate,
+        session: Session = Depends(get_session),
+        user: User = Depends(current_user),
+):
+    """Update a habit. habit_type cannot be changed after creation."""
+    habit = session.get(Habit, habit_id)
+    if not habit or habit.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Habit not found")
+
+    # habit_type is immutable after creation
+    if habit_update.habit_type is not None and habit_update.habit_type != habit.habit_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Habit type cannot be changed after creation"
+        )
+
+    update_data = habit_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(habit, key, value)
+
+    habit.updated_at = datetime.utcnow()
+    session.add(habit)
+    session.commit()
+    session.refresh(habit)
+    return _build_habit_response(session, habit, date.today())
 
 
 @router.get("/")
@@ -153,32 +184,6 @@ def get_habit(
     if not habit or habit.user_id != user.id:
         raise HTTPException(status_code=404, detail="Habit not found")
     return habit
-
-
-@router.put("/{habit_id}")
-def update_habit(
-        habit_id: int,
-        habit_update: HabitUpdate,
-        session: Session = Depends(get_session),
-        user: User = Depends(current_user),
-):
-    """Update a habit"""
-    habit = session.get(Habit, habit_id)
-    if not habit or habit.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Habit not found")
-
-    update_data = habit_update.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(habit, key, value)
-
-    # set updated_at manually — onupdate is unreliable with SQLModel/SQLite
-    habit.updated_at = datetime.utcnow()
-
-    session.add(habit)
-    session.commit()
-    session.refresh(habit)
-    return habit
-
 
 @router.delete("/{habit_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_habit(

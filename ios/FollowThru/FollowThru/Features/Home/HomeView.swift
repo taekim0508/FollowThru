@@ -3,7 +3,6 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
     @State private var showCreate = false
-    @State private var showCelebration = false
     @State private var selectedHabitForDetail: Habit? = nil
 
     private var greeting: String {
@@ -30,22 +29,58 @@ struct HomeView: View {
                     .padding(.horizontal)
                     .padding(.top, 8)
 
-                    // Progress summary
-                    if !appState.habits.isEmpty {
-                        progressCard
-                            .padding(.horizontal)
-                    }
-
-                    // Habit list
-                    if appState.habits.isEmpty {
+                    if appState.isHabitsLoading {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
+                    } else if appState.habits.isEmpty {
                         emptyState
                     } else {
-                        LazyVStack(spacing: 12) {
-                            ForEach(appState.habits) { habit in
-                                habitRow(habit)
-                                    .padding(.horizontal)
+                        // Today's progress summary
+                        progressCard
+                            .padding(.horizontal)
+
+                        // Section 1 — scheduled today, not yet complete
+                        let pending = appState.todaysHabits.filter { !$0.todayComplete }
+                        if !pending.isEmpty {
+                            sectionHeader("Today")
+                            LazyVStack(spacing: 12) {
+                                ForEach(pending) { habit in
+                                    habitRow(habit)
+                                        .padding(.horizontal)
+                                }
                             }
                         }
+
+                        // Section 2 — scheduled today, already complete
+                        let completed = appState.todaysHabits.filter { $0.todayComplete }
+                        if !completed.isEmpty {
+                            sectionHeader("Completed")
+                            LazyVStack(spacing: 12) {
+                                ForEach(completed) { habit in
+                                    habitRow(habit)
+                                        .padding(.horizontal)
+                                }
+                            }
+                        }
+
+                        // Section 3 — not scheduled today
+                        if !appState.nonTodayHabits.isEmpty {
+                            sectionHeader("Not Today")
+                            LazyVStack(spacing: 12) {
+                                ForEach(appState.nonTodayHabits) { habit in
+                                    habitRow(habit, dimmed: true)
+                                        .padding(.horizontal)
+                                }
+                            }
+                        }
+                    }
+
+                    if let error = appState.habitsError {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundColor(.red)
+                            .padding(.horizontal)
                     }
                 }
                 .padding(.bottom, 24)
@@ -65,16 +100,18 @@ struct HomeView: View {
             .sheet(isPresented: $showCreate) {
                 CreateHabitView()
             }
-            .sheet(isPresented: $showCelebration) {
-                CelebrationView()
-                    .presentationDetents([.medium])
-            }
-            .sheet(isPresented: $showCreate) {
-                CreateHabitView()
-            }
             .sheet(item: $selectedHabitForDetail) { habit in
                 HabitDetailView(habit: habit)
                     .environmentObject(appState)
+            }
+            .sheet(item: $appState.selectedHabit) { habit in
+                CompletionModalView(habit: habit)
+                    .presentationDetents([.medium])
+            }
+            .onAppear {
+                Task {
+                    await appState.loadHabits()
+                }
             }
         }
     }
@@ -82,8 +119,8 @@ struct HomeView: View {
     // MARK: - Subviews
 
     private var progressCard: some View {
-        let total = appState.habits.count
-        let done = appState.habits.filter { appState.isCompleted(habit: $0) }.count
+        let total = appState.todaysHabits.count
+        let done = appState.todaysHabits.filter { $0.todayComplete }.count
         let pct = total > 0 ? Double(done) / Double(total) : 0
 
         return HabitCard {
@@ -103,49 +140,89 @@ struct HomeView: View {
     }
 
     @ViewBuilder
-    private func habitRow(_ habit: Habit) -> some View {
-        let done = appState.isCompleted(habit: habit)
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .foregroundColor(Theme.textSecondary)
+            .padding(.horizontal)
+            .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private func habitRow(_ habit: Habit, dimmed: Bool = false) -> some View {
         HabitCard {
             HStack(spacing: 12) {
+                // icon
                 Circle()
-                    .fill(done ? Theme.sage : Theme.softBlue.opacity(0.25))
+                    .fill(habit.todayComplete ? Theme.sage : Theme.softBlue.opacity(0.25))
                     .frame(width: 44, height: 44)
                     .overlay(
-                        Image(systemName: done ? "checkmark" : kpiIcon(habit.kpiType))
-                            .foregroundColor(done ? Theme.white : Theme.softBlue)
+                        Image(systemName: habit.todayComplete ? "checkmark" : habitIcon(habit))
+                            .foregroundColor(habit.todayComplete ? Theme.white : Theme.softBlue)
                             .font(.system(size: 16, weight: .semibold))
                     )
 
+                // name + meta
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(habit.name).font(.headline)
+                    Text(habit.name)
+                        .font(.headline)
+                        .foregroundColor(dimmed ? Theme.textSecondary : Theme.primary)
+
                     HStack(spacing: 6) {
-                        Text(habit.kpiType.rawValue)
+                        // habit type badge
+                        Text(habit.habitType == "binary" ? "Completion" : "Tracked")
                             .font(.caption)
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(Theme.sageLight)
                             .cornerRadius(8)
-                        if habit.streak > 0 {
-                            Label("\(habit.streak)", systemImage: "flame.fill")
+
+                        // streak badge
+                        if habit.currentStreak > 0 {
+                            Label("\(habit.currentStreak)", systemImage: "flame.fill")
                                 .font(.caption)
                                 .foregroundColor(Theme.terracotta)
+                        }
+
+                        // progress for tracked habits
+                        if habit.habitType == "tracked", let progress = habit.todayProgress {
+                            let target = habit.targetValue ?? 0
+                            let unit = habit.quantityUnit ?? ""
+                            Text("\(Int(progress))/\(Int(target)) \(unit)")
+                                .font(.caption)
+                                .foregroundColor(Theme.textSecondary)
                         }
                     }
                 }
 
                 Spacer()
 
-                if done {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(Theme.sage)
-                        .font(.system(size: 22))
-                } else {
-                    AppButton("Done", variant: .compact, colorStyle: .action) {
-                        appState.selectedHabit = habit
-                        appState.showCompletionModal = true
+                // action button — only for today's habits
+                if !dimmed {
+                    if habit.todayComplete && habit.habitType == "binary" {
+                        // completed binary — show checkmark, no button
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(Theme.sage)
+                            .font(.system(size: 22))
+                    } else if habit.habitType == "binary" {
+                        // incomplete binary button — show Done
+                        AppButton("Done", variant: .compact, colorStyle: .action) {
+                            appState.selectedHabit = habit
+                        }
+                    } else {
+                        // tracked habit — show Log or Update
+                        AppButton(
+                            habit.todayProgress != nil ? "Update" : "Log",
+                            variant: .compact,
+                            colorStyle: .action
+                        ) {
+                            appState.selectedHabit = habit
+                        }
                     }
                 }
             }
         }
+        .opacity(dimmed ? 0.5 : 1.0)
         .onTapGesture {
             selectedHabitForDetail = habit
         }
@@ -166,11 +243,9 @@ struct HomeView: View {
         .padding(.top, 80)
     }
 
-    private func kpiIcon(_ type: KPIType) -> String {
-        switch type {
-        case .checkbox: return "checkmark"
-        case .duration: return "clock"
-        case .count:    return "number"
-        }
+    private func habitIcon(_ habit: Habit) -> String {
+        if habit.habitType == "binary" { return "checkmark" }
+        if habit.quantityUnit == "minutes" { return "clock" }
+        return "number"
     }
 }

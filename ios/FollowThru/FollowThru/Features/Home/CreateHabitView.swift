@@ -6,17 +6,42 @@ struct CreateHabitView: View {
 
     @State private var name = ""
     @State private var description = ""
-    
-    @State private var kpiType: KPIType = .checkbox
-    @State private var kpiDurationTarget: String = ""
-    @State private var kpiAmountTarget: String = ""
-    
-    @State private var selectedDays: Set<Int> = []   // 1=Sun…7=Sat
-    @State private var useTime = false
-    @State private var scheduledTime = Date()
-    
 
-    private let dayLabels = ["S","M","T","W","T","F","S"]
+    // habit type — "binary" or "tracked"
+    @State private var habitType = "binary"
+
+    // for tracked habits
+    @State private var targetValueString = ""
+    @State private var quantityUnit = ""
+    @State private var showCustomUnit = false
+    @State private var selectedPresetUnit = "minutes"
+
+    // scheduling
+    @State private var selectedDays: Set<String> = []
+    @State private var showDayWarning = false
+
+    // trigger time
+    @State private var triggerTime = Date()
+
+    // preset unit options
+    private let presetUnits = ["minutes", "hours", "pages", "reps", "glasses", "km", "miles", "times"]
+    private let dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+    private let dayLabels = ["S", "M", "T", "W", "T", "F", "S"]
+
+    private var canSave: Bool {
+        guard !name.isEmpty else { return false }
+        guard !selectedDays.isEmpty else { return false }
+        if habitType == "tracked" {
+            guard !targetValueString.isEmpty else { return false }
+            guard Double(targetValueString) != nil else { return false }
+            guard !effectiveUnit.isEmpty else { return false }
+        }
+        return true
+    }
+
+    private var effectiveUnit: String {
+        showCustomUnit ? quantityUnit : selectedPresetUnit
+    }
 
     var body: some View {
         NavigationStack {
@@ -32,7 +57,7 @@ struct CreateHabitView: View {
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
                     }
 
-                    // Description (optional)
+                    // Description
                     fieldSection("Description (optional)") {
                         TextField("What does this habit involve?", text: $description)
                             .padding(12)
@@ -41,52 +66,91 @@ struct CreateHabitView: View {
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
                     }
 
-                    // KPI type
+                    // Habit Type
                     fieldSection("How will you track it?") {
-                        Picker("KPI", selection: $kpiType) {
-                            ForEach(KPIType.allCases, id: \.self) { t in
-                                Text(t.rawValue).tag(t)
-                            }
+                        Picker("Habit Type", selection: $habitType) {
+                            Text("Completion").tag("binary")
+                            Text("Numeric Goal").tag("tracked")
                         }
                         .pickerStyle(.segmented)
 
-                        if kpiType == .duration {
-                            HStack {
-                                TextField("e.g. 30", text: $kpiDurationTarget)
-                                    .keyboardType(.numberPad)
-                                    .padding(12)
-                                    .background(Theme.white)
-                                    .cornerRadius(10)
-                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
-                                Text("min")
-                                    .foregroundColor(Theme.textSecondary)
-                                    .fontWeight(.semibold)
-                            }
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                        } else if kpiType == .count {
-                            HStack {
-                                Text("Count: ")
-                                    .foregroundColor(Theme.textSecondary)
-                                    .fontWeight(.semibold)
-                                TextField("e.g. 10", text: $kpiAmountTarget)
-                                    .keyboardType(.numberPad)
-                                    .padding(12)
-                                    .background(Theme.white)
-                                    .cornerRadius(10)
-                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
-                                
+                        if habitType == "tracked" {
+                            VStack(alignment: .leading, spacing: 12) {
+                                // target value
+                                HStack {
+                                    TextField("Target amount", text: $targetValueString)
+                                        .keyboardType(.decimalPad)
+                                        .padding(12)
+                                        .background(Theme.white)
+                                        .cornerRadius(10)
+                                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
+
+                                    Text(effectiveUnit)
+                                        .foregroundColor(Theme.textSecondary)
+                                        .fontWeight(.semibold)
+                                        .frame(minWidth: 60)
+                                }
+
+                                // unit picker
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(presetUnits, id: \.self) { unit in
+                                            Button {
+                                                selectedPresetUnit = unit
+                                                showCustomUnit = false
+                                            } label: {
+                                                Text(unit)
+                                                    .font(.caption).fontWeight(.semibold)
+                                                    .padding(.horizontal, 12).padding(.vertical, 6)
+                                                    .background(
+                                                        selectedPresetUnit == unit && !showCustomUnit
+                                                        ? Theme.primary : Theme.offWhite
+                                                    )
+                                                    .foregroundColor(
+                                                        selectedPresetUnit == unit && !showCustomUnit
+                                                        ? Theme.white : Theme.textSecondary
+                                                    )
+                                                    .cornerRadius(16)
+                                            }
+                                        }
+
+                                        // custom option
+                                        Button {
+                                            showCustomUnit = true
+                                        } label: {
+                                            Text("custom")
+                                                .font(.caption).fontWeight(.semibold)
+                                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                                .background(showCustomUnit ? Theme.primary : Theme.offWhite)
+                                                .foregroundColor(showCustomUnit ? Theme.white : Theme.textSecondary)
+                                                .cornerRadius(16)
+                                        }
+                                    }
+                                }
+
+                                if showCustomUnit {
+                                    TextField("Enter custom unit", text: $quantityUnit)
+                                        .padding(12)
+                                        .background(Theme.white)
+                                        .cornerRadius(10)
+                                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
+                                        .transition(.opacity)
+                                }
                             }
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
+                    .animation(.easeInOut(duration: 0.2), value: habitType)
 
-                    // Days of week
+                    // Schedule
                     fieldSection("Repeat on") {
                         HStack(spacing: 8) {
-                            ForEach(1...7, id: \.self) { day in
+                            ForEach(Array(dayNames.enumerated()), id: \.offset) { index, day in
                                 let selected = selectedDays.contains(day)
-                                Button { toggle(day) } label: {
-                                    Text(dayLabels[day - 1])
+                                Button {
+                                    toggleDay(day)
+                                } label: {
+                                    Text(dayLabels[index])
                                         .font(.caption).fontWeight(.semibold)
                                         .frame(width: 36, height: 36)
                                         .background(selected ? Theme.primary : Theme.offWhite)
@@ -95,17 +159,25 @@ struct CreateHabitView: View {
                                 }
                             }
                         }
+
+                        // inline warning when trying to deselect last day
+                        if showDayWarning {
+                            Text("At least one day must be selected")
+                                .font(.caption)
+                                .foregroundColor(Theme.terracotta)
+                                .transition(.opacity)
+                        }
                     }
 
-                    // Optional time
-                    fieldSection("Schedule a time?") {
-                        Toggle("Set a specific time", isOn: $useTime)
-                            .tint(Theme.primary)
-                        if useTime {
-                            DatePicker("Time", selection: $scheduledTime, displayedComponents: .hourAndMinute)
-                                .datePickerStyle(.compact)
-                                .labelsHidden()
-                        }
+                    // Trigger time
+                    fieldSection("Reminder time") {
+                        DatePicker(
+                            "Time",
+                            selection: $triggerTime,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .datePickerStyle(.compact)
+                        .labelsHidden()
                     }
                 }
                 .padding()
@@ -121,53 +193,74 @@ struct CreateHabitView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") { save() }
                         .fontWeight(.semibold)
-                        .foregroundColor(name.isEmpty ? Theme.textSecondary : Theme.primary)
-                        .disabled(name.isEmpty)
+                        .foregroundColor(canSave ? Theme.primary : Theme.textSecondary)
+                        .disabled(!canSave)
                 }
+            }
+            .onAppear {
+                // auto-select today's weekday
+                let formatter = DateFormatter()
+                formatter.dateFormat = "EEEE"
+                let today = formatter.string(from: Date()).lowercased()
+                selectedDays.insert(today)
             }
         }
     }
 
     // MARK: - Helpers
 
-    private func toggle(_ day: Int) {
-        if selectedDays.contains(day) { selectedDays.remove(day) }
-        else { selectedDays.insert(day) }
+    private func toggleDay(_ day: String) {
+        if selectedDays.contains(day) {
+            if selectedDays.count == 1 {
+                // can't deselect last day — show warning
+                showDayWarning = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    showDayWarning = false
+                }
+                return
+            }
+            selectedDays.remove(day)
+        } else {
+            selectedDays.insert(day)
+        }
+        showDayWarning = false
     }
 
     private func save() {
-        let targetValue: Double? = {
-            switch kpiType {
-            case .duration: return Double(kpiDurationTarget)
-            case .count:    return Double(kpiAmountTarget)
-            case .checkbox: return nil
-            }
-        }()
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm"
+        let triggerValueString = timeFormatter.string(from: triggerTime)
 
-        let habit = Habit(
-            name: name,
-            description: description,
-            kpiType: kpiType,
-            kpiTarget: targetValue,
-            scheduledDays: Array(selectedDays).sorted(),
-            scheduledTime: useTime ? scheduledTime : nil
-        )
-        appState.habits.append(habit)
-        dismiss()
+        let frequencyPattern = ["days": Array(selectedDays)]
+
+        let targetValue = habitType == "tracked" ? Double(targetValueString) : nil
+        let unit = habitType == "tracked" ? effectiveUnit : nil
+
+        Task {
+            await appState.createHabit(
+                name: name,
+                description: description,
+                category: "general",
+                habitType: habitType,
+                targetValue: targetValue,
+                quantityUnit: unit,
+                triggerValue: triggerValueString,
+                frequencyPattern: frequencyPattern
+            )
+            dismiss()
+        }
     }
 
     @ViewBuilder
-    private func fieldSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func fieldSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.subheadline).fontWeight(.semibold)
                 .foregroundColor(Theme.primary)
             content()
-            
-            // Add lines in between sections for better ui
-            Divider()
-                .background(Color.black.opacity(0.3))
-                .padding(.top, 10)
         }
     }
 }

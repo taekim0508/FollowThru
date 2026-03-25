@@ -62,8 +62,7 @@ struct SettingsView: View {
                     .fontWeight(.semibold)
                     .disabled(!hasAccountChanges || appState.isAuthLoading)
                 if appState.isAuthLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
+                    ProgressView().frame(maxWidth: .infinity)
                 }
             }
 
@@ -76,6 +75,7 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            // changed from currentUser?.username to currentUser?.name
             name = appState.currentUser?.username ?? ""
             email = appState.currentUser?.email ?? ""
             appState.authError = nil

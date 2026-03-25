@@ -41,11 +41,5 @@ struct MainTabView: View {
                 .tabItem { Label("Profile", systemImage: "person") }
         }
         .accentColor(Theme.primary)
-        .sheet(isPresented: $appState.showCompletionModal) {
-            if let habit = appState.selectedHabit {
-                CompletionModalView(habit: habit)
-                    .presentationDetents([.medium])
-            }
-        }
     }
 }

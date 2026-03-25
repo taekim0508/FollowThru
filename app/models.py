@@ -18,27 +18,45 @@ class User(SQLModel, table=True):
     updated_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"onupdate": datetime.utcnow})
     
     # Relationships (not stored in DB, just for querying)
-    habits: List["Habit"] = Relationship(back_populates="user")
-    completions: List["Completion"] = Relationship(back_populates="user")
+    habits: List["Habit"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    completions: List["Completion"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
 
     # Friend requests
     sent_friend_requests: List["FriendRequest"] = Relationship(
         back_populates="requester",
-        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.requester_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[FriendRequest.requester_id]",
+            "cascade": "all, delete-orphan"
+        },
     )
     received_friend_requests: List["FriendRequest"] = Relationship(
         back_populates="receiver",
-        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.receiver_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[FriendRequest.receiver_id]",
+            "cascade": "all, delete-orphan"
+        },
     )
 
     # Friendships (accepted friends)
     friendships_as_low: List["Friendship"] = Relationship(
         back_populates="user_low",
-        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_low_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[Friendship.user_low_id]",
+            "cascade": "all, delete-orphan"
+        },
     )
     friendships_as_high: List["Friendship"] = Relationship(
         back_populates="user_high",
-        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_high_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[Friendship.user_high_id]",
+            "cascade": "all, delete-orphan"
+        },
     )
 
 class Habit(SQLModel, table=True):
@@ -83,7 +101,10 @@ class Habit(SQLModel, table=True):
     updated_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"onupdate": datetime.utcnow})
 
     user: Optional[User] = Relationship(back_populates="habits")
-    completions: List["Completion"] = Relationship(back_populates="habit")
+    completions: List["Completion"] = Relationship(
+        back_populates="habit",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
 
 
 class Completion(SQLModel, table=True):

@@ -8,28 +8,37 @@ struct HabitDetailView: View {
 
     @State private var isEditing = false
     @State private var showDeleteAlert = false
+    @State private var isLoading = false
 
-    // Editable fields
-    @State private var name: String
-    @State private var description: String
-    @State private var kpiType: KPIType
-    @State private var kpiTarget: String
-    @State private var selectedDays: Set<Int>
-    @State private var useTime: Bool
-    @State private var scheduledTime: Date
+    // editable fields
+    @State private var name = ""
+    @State private var description = ""
+    @State private var habitType = ""
+    @State private var targetValueString = ""
+    @State private var quantityUnit = ""
+    @State private var selectedPresetUnit = "minutes"
+    @State private var showCustomUnit = false
+    @State private var selectedDays: Set<String> = []
+    @State private var showDayWarning = false
+    @State private var triggerTime = Date()
 
-    private let dayLabels = ["S","M","T","W","T","F","S"]
-    private let cal = Calendar.current
+    private let presetUnits = ["minutes", "hours", "pages", "reps", "glasses", "km", "miles", "times"]
+    private let dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+    private let dayLabels = ["S", "M", "T", "W", "T", "F", "S"]
 
-    init(habit: Habit) {
-        self.habit = habit
-        _name = State(initialValue: habit.name)
-        _description = State(initialValue: habit.description)
-        _kpiType = State(initialValue: habit.kpiType)
-        _kpiTarget = State(initialValue: habit.kpiTarget.map { String(Int($0)) } ?? "")
-        _selectedDays = State(initialValue: Set(habit.scheduledDays))
-        _useTime = State(initialValue: habit.scheduledTime != nil)
-        _scheduledTime = State(initialValue: habit.scheduledTime ?? Date())
+    private var effectiveUnit: String {
+        showCustomUnit ? quantityUnit : selectedPresetUnit
+    }
+
+    private var canSave: Bool {
+        guard !name.isEmpty else { return false }
+        guard !selectedDays.isEmpty else { return false }
+        if habitType == "tracked" {
+            guard !targetValueString.isEmpty else { return false }
+            guard Double(targetValueString) != nil else { return false }
+            guard !effectiveUnit.isEmpty else { return false }
+        }
+        return true
     }
 
     var body: some View {
@@ -43,8 +52,8 @@ struct HabitDetailView: View {
 
                     nameSection
                     descriptionSection
-                    kpiSection
-                    daysSection
+                    habitTypeSection
+                    scheduleSection
                     timeSection
 
                     if isEditing {
@@ -59,35 +68,36 @@ struct HabitDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(isEditing ? "Cancel" : "Close") {
-                        if isEditing {
-                            cancelEdit()
-                        } else {
-                            dismiss()
-                        }
+                        if isEditing { cancelEdit() } else { dismiss() }
                     }
                     .foregroundColor(Theme.textSecondary)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(isEditing ? "Save" : "Edit") {
-                        if isEditing {
-                            save()
-                        } else {
-                            withAnimation { isEditing = true }
+                    if isLoading {
+                        ProgressView()
+                    } else {
+                        Button(isEditing ? "Save" : "Edit") {
+                            if isEditing { save() }
+                            else { withAnimation { isEditing = true } }
                         }
+                        .fontWeight(.semibold)
+                        .foregroundColor(isEditing && !canSave ? Theme.textSecondary : Theme.primary)
+                        .disabled(isEditing && !canSave)
                     }
-                    .fontWeight(.semibold)
-                    .foregroundColor(Theme.primary)
                 }
             }
             .alert("Delete Habit", isPresented: $showDeleteAlert) {
                 Button("Delete", role: .destructive) {
-                    appState.deleteHabit(habit)
-                    dismiss()
+                    Task {
+                        await appState.deleteHabit(habit)
+                        dismiss()
+                    }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This will permanently delete \"\(habit.name)\" and all its history. This can't be undone.")
             }
+            .onAppear { populateFields() }
         }
     }
 
@@ -99,29 +109,22 @@ struct HabitDetailView: View {
                 statItem(
                     icon: "flame.fill",
                     color: Theme.terracotta,
-                    value: "\(habit.streak)",
+                    value: "\(habit.currentStreak)",
                     label: "Streak"
                 )
                 Divider().frame(height: 40)
                 statItem(
-                    icon: "checkmark.circle.fill",
+                    icon: "trophy.fill",
                     color: Theme.sage,
-                    value: "\(totalCompletions)",
-                    label: "Completions"
+                    value: "\(habit.maxStreak)",
+                    label: "Best"
                 )
                 Divider().frame(height: 40)
                 statItem(
-                    icon: "percent",
-                    color: Theme.primary,
-                    value: "\(completionRate)%",
-                    label: "Rate"
-                )
-                Divider().frame(height: 40)
-                statItem(
-                    icon: "calendar",
-                    color: Theme.softBlue,
-                    value: "\(daysSinceCreated)d",
-                    label: "Age"
+                    icon: habit.todayComplete ? "checkmark.circle.fill" : "circle",
+                    color: habit.todayComplete ? Theme.sage : Theme.textSecondary,
+                    value: habit.todayComplete ? "Done" : "Pending",
+                    label: "Today"
                 )
             }
         }
@@ -137,7 +140,7 @@ struct HabitDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Editable Sections
+    // MARK: - Edit Sections
 
     private var nameSection: some View {
         fieldSection("Habit Name") {
@@ -148,7 +151,7 @@ struct HabitDetailView: View {
                     .cornerRadius(10)
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
             } else {
-                readOnlyRow(value: name)
+                readOnly(habit.name)
             }
         }
     }
@@ -156,113 +159,83 @@ struct HabitDetailView: View {
     private var descriptionSection: some View {
         fieldSection("Description") {
             if isEditing {
-                TextField("What does this habit involve?", text: $description)
+                TextField("Description", text: $description)
                     .padding(12)
                     .background(Theme.white)
                     .cornerRadius(10)
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
             } else {
-                readOnlyRow(value: description.isEmpty ? "None" : description)
+                readOnly(habit.description.isEmpty ? "None" : habit.description)
             }
         }
     }
 
-    private var kpiSection: some View {
+    private var habitTypeSection: some View {
         fieldSection("Tracking") {
-            if isEditing {
-                Picker("KPI", selection: $kpiType) {
-                    ForEach(KPIType.allCases, id: \.self) { t in
-                        Text(t.rawValue).tag(t)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                if kpiType == .duration {
-                    HStack {
-                        TextField("e.g. 30", text: $kpiTarget)
-                            .keyboardType(.numberPad)
-                            .padding(12)
-                            .background(Theme.white)
-                            .cornerRadius(10)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
-                        Text("min")
-                            .foregroundColor(Theme.textSecondary)
-                            .fontWeight(.semibold)
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                } else if kpiType == .count {
-                    HStack {
-                        TextField("e.g. 10", text: $kpiTarget)
-                            .keyboardType(.numberPad)
-                            .padding(12)
-                            .background(Theme.white)
-                            .cornerRadius(10)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
-                        Text("times")
-                            .foregroundColor(Theme.textSecondary)
-                            .fontWeight(.semibold)
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            } else {
-                let targetText = habit.kpiTarget.map { " · target: \(Int($0))" } ?? ""
-                readOnlyRow(value: "\(habit.kpiType.rawValue)\(targetText)")
-            }
+            // habit type is read-only — cannot be changed after creation
+            let typeLabel = habit.habitType == "binary" ? "Completion" : "Numeric Goal"
+            let unitLabel = habit.quantityUnit.map {
+                " · \(habit.targetValue.map { "\(Int($0)) " } ?? "")\($0)"
+            } ?? ""
+            readOnly("\(typeLabel)\(unitLabel)")
         }
-        .animation(.easeInOut(duration: 0.2), value: kpiType)
     }
 
-    private var daysSection: some View {
+    private var scheduleSection: some View {
         fieldSection("Repeat on") {
             if isEditing {
-                HStack(spacing: 8) {
-                    ForEach(1...7, id: \.self) { day in
-                        let selected = selectedDays.contains(day)
-                        Button { toggleDay(day) } label: {
-                            Text(dayLabels[day - 1])
-                                .font(.caption).fontWeight(.semibold)
-                                .frame(width: 36, height: 36)
-                                .background(selected ? Theme.primary : Theme.offWhite)
-                                .foregroundColor(selected ? Theme.white : Theme.textSecondary)
-                                .clipShape(Circle())
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(dayNames.enumerated()), id: \.offset) { index, day in
+                            let selected = selectedDays.contains(day)
+                            Button { toggleDay(day) } label: {
+                                Text(dayLabels[index])
+                                    .font(.caption).fontWeight(.semibold)
+                                    .frame(width: 36, height: 36)
+                                    .background(selected ? Theme.primary : Theme.offWhite)
+                                    .foregroundColor(selected ? Theme.white : Theme.textSecondary)
+                                    .clipShape(Circle())
+                            }
                         }
+                    }
+                    if showDayWarning {
+                        Text("At least one day must be selected")
+                            .font(.caption)
+                            .foregroundColor(Theme.terracotta)
                     }
                 }
             } else {
-                readOnlyRow(value: scheduledDaysText)
+                let days = habit.frequencyPattern.days
+                let display = days.count == 7
+                    ? "Every day"
+                    : days.map { $0.prefix(3).capitalized }.joined(separator: ", ")
+                readOnly(display)
             }
         }
     }
 
     private var timeSection: some View {
-        fieldSection("Scheduled Time") {
+        fieldSection("Reminder time") {
             if isEditing {
-                Toggle("Set a specific time", isOn: $useTime)
-                    .tint(Theme.primary)
-                if useTime {
-                    DatePicker("Time", selection: $scheduledTime, displayedComponents: .hourAndMinute)
-                        .datePickerStyle(.compact)
-                        .labelsHidden()
-                }
+                DatePicker(
+                    "Time",
+                    selection: $triggerTime,
+                    displayedComponents: .hourAndMinute
+                )
+                .datePickerStyle(.compact)
+                .labelsHidden()
             } else {
-                if let time = habit.scheduledTime {
-                    readOnlyRow(value: time, formatter: timeFormatter)
-                } else {
-                    readOnlyRow(value: "No time set")
-                }
+                readOnly(habit.triggerValue)
             }
         }
     }
 
     private var deleteButton: some View {
-        Button {
-            showDeleteAlert = true
-        } label: {
+        Button { showDeleteAlert = true } label: {
             HStack {
                 Spacer()
                 Image(systemName: "trash")
-                Text("Delete Habit")
-                    .fontWeight(.semibold)
+                Text("Delete Habit").fontWeight(.semibold)
                 Spacer()
             }
             .foregroundColor(.red)
@@ -276,7 +249,10 @@ struct HabitDetailView: View {
     // MARK: - Helpers
 
     @ViewBuilder
-    private func fieldSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func fieldSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.subheadline).fontWeight(.semibold)
@@ -286,7 +262,7 @@ struct HabitDetailView: View {
     }
 
     @ViewBuilder
-    private func readOnlyRow(value: String) -> some View {
+    private func readOnly(_ value: String) -> some View {
         Text(value)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -295,72 +271,75 @@ struct HabitDetailView: View {
             .foregroundColor(Theme.primary)
     }
 
-    @ViewBuilder
-    private func readOnlyRow(value: Date, formatter: DateFormatter) -> some View {
-        Text(formatter.string(from: value))
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.offWhite)
-            .cornerRadius(10)
-            .foregroundColor(Theme.primary)
-    }
-
-    private func toggleDay(_ day: Int) {
-        if selectedDays.contains(day) { selectedDays.remove(day) }
-        else { selectedDays.insert(day) }
-    }
-
-    private func save() {
-        let targetValue: Double? = {
-            switch kpiType {
-            case .duration, .count: return Double(kpiTarget)
-            case .checkbox: return nil
+    private func toggleDay(_ day: String) {
+        if selectedDays.contains(day) {
+            if selectedDays.count == 1 {
+                showDayWarning = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    showDayWarning = false
+                }
+                return
             }
-        }()
+            selectedDays.remove(day)
+        } else {
+            selectedDays.insert(day)
+        }
+        showDayWarning = false
+    }
 
-        appState.updateHabit(habit, name: name, description: description, kpiType: kpiType, kpiTarget: targetValue, scheduledDays: Array(selectedDays).sorted(), scheduledTime: useTime ? scheduledTime : nil)
+    private func populateFields() {
+        name = habit.name
+        description = habit.description
+        habitType = habit.habitType
+        targetValueString = habit.targetValue.map { String(Int($0)) } ?? ""
+        selectedDays = Set(habit.frequencyPattern.days)
 
-        withAnimation { isEditing = false }
+        // populate unit picker
+        if let unit = habit.quantityUnit {
+            if presetUnits.contains(unit) {
+                selectedPresetUnit = unit
+                showCustomUnit = false
+            } else {
+                quantityUnit = unit
+                showCustomUnit = true
+            }
+        }
+
+        // parse trigger time string "HH:mm" → Date
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        if let t = formatter.date(from: habit.triggerValue) {
+            triggerTime = t
+        }
     }
 
     private func cancelEdit() {
-        // Reset all fields back to original
-        name = habit.name
-        description = habit.description
-        kpiType = habit.kpiType
-        kpiTarget = habit.kpiTarget.map { String(Int($0)) } ?? ""
-        selectedDays = Set(habit.scheduledDays)
-        useTime = habit.scheduledTime != nil
-        scheduledTime = habit.scheduledTime ?? Date()
+        populateFields()
         withAnimation { isEditing = false }
     }
 
-    // MARK: - Computed Stats
+    private func save() {
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm"
+        let triggerValueString = timeFormatter.string(from: triggerTime)
 
-    private var totalCompletions: Int {
-        appState.logs.filter { $0.habitId == habit.id && $0.completed }.count
-    }
+        let targetValue = habitType == "tracked" ? Double(targetValueString) : nil
+        let unit = habitType == "tracked" ? effectiveUnit : nil
 
-    private var completionRate: Int {
-        let relevant = appState.logs.filter { $0.habitId == habit.id }
-        guard !relevant.isEmpty else { return 0 }
-        let completed = relevant.filter { $0.completed }.count
-        return Int(Double(completed) / Double(relevant.count) * 100)
-    }
-
-    private var daysSinceCreated: Int {
-        cal.dateComponents([.day], from: habit.createdAt, to: Date()).day ?? 0
-    }
-
-    private var scheduledDaysText: String {
-        guard !habit.scheduledDays.isEmpty else { return "Every day" }
-        let labels = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]
-        return habit.scheduledDays.map { labels[$0 - 1] }.joined(separator: ", ")
+        isLoading = true
+        Task {
+            await appState.updateHabit(
+                habit,
+                name: name,
+                description: description,
+                triggerValue: triggerValueString,
+                frequencyPattern: ["days": Array(selectedDays)],
+                habitType: habitType,
+                targetValue: targetValue,
+                quantityUnit: unit
+            )
+            isLoading = false
+            withAnimation { isEditing = false }
+        }
     }
 }
-
-private let timeFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.timeStyle = .short
-    return f
-}()

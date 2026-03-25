@@ -3,32 +3,31 @@ import SwiftUI
 struct CalendarView: View {
     @EnvironmentObject var appState: AppState
     @State private var displayMonth = Date()
-    @State private var selectedHabit: Habit? = nil  // nil = "All"
+    @State private var selectedHabit: Habit? = nil
 
     private let cal = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible()), count: 7)
     private let weekdayHeaders = ["SUN","MON","TUE","WED","THU","FRI","SAT"]
+    private let dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
 
-                    // Habit picker
+                    // habit picker
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-
-                            // All pill — always first
                             Button { selectedHabit = nil } label: {
                                 Text("All")
-                                    .font(.subheadline).fontWeight(selectedHabit == nil ? .semibold : .regular)
+                                    .font(.subheadline)
+                                    .fontWeight(selectedHabit == nil ? .semibold : .regular)
                                     .padding(.horizontal, 14).padding(.vertical, 8)
                                     .background(selectedHabit == nil ? Theme.primary : Theme.offWhite)
                                     .foregroundColor(selectedHabit == nil ? Theme.white : Theme.textSecondary)
                                     .cornerRadius(20)
                             }
 
-                            // Separator
                             if !appState.habits.isEmpty {
                                 Rectangle()
                                     .fill(Theme.lightGray)
@@ -40,7 +39,8 @@ struct CalendarView: View {
                                 let selected = selectedHabit?.id == habit.id
                                 Button { selectedHabit = habit } label: {
                                     Text(habit.name)
-                                        .font(.subheadline).fontWeight(selected ? .semibold : .regular)
+                                        .font(.subheadline)
+                                        .fontWeight(selected ? .semibold : .regular)
                                         .padding(.horizontal, 14).padding(.vertical, 8)
                                         .background(selected ? Theme.primary : Theme.offWhite)
                                         .foregroundColor(selected ? Theme.white : Theme.textSecondary)
@@ -51,27 +51,24 @@ struct CalendarView: View {
                         .padding(.horizontal)
                     }
 
-                    // Month navigation
+                    // month navigation
                     HStack {
                         Button { shiftMonth(-1) } label: {
                             Image(systemName: "chevron.left")
-                                .foregroundColor(Theme.primary)
-                                .padding(8)
+                                .foregroundColor(Theme.primary).padding(8)
                         }
                         Spacer()
                         Text(displayMonth, formatter: monthFormatter)
-                            .font(.headline)
-                            .foregroundColor(Theme.primary)
+                            .font(.headline).foregroundColor(Theme.primary)
                         Spacer()
                         Button { shiftMonth(1) } label: {
                             Image(systemName: "chevron.right")
-                                .foregroundColor(Theme.primary)
-                                .padding(8)
+                                .foregroundColor(Theme.primary).padding(8)
                         }
                     }
                     .padding(.horizontal)
 
-                    // Calendar grid
+                    // calendar grid
                     VStack(spacing: 4) {
                         HStack {
                             ForEach(weekdayHeaders, id: \.self) { d in
@@ -91,12 +88,12 @@ struct CalendarView: View {
                         .padding(.horizontal)
                     }
 
-                    // Stats
+                    // stats
                     if let habit = selectedHabit {
-                        statsCard(habit: habit)
+                        singleHabitStats(habit)
                             .padding(.horizontal)
                     } else {
-                        allStatsCard
+                        allHabitsStats
                             .padding(.horizontal)
                     }
                 }
@@ -106,8 +103,8 @@ struct CalendarView: View {
             .navigationTitle("Calendar")
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: appState.habits.count) { _ in
-                // If selected habit was deleted, fall back to All
-                if let selected = selectedHabit, !appState.habits.contains(where: { $0.id == selected.id }) {
+                if let selected = selectedHabit,
+                   !appState.habits.contains(where: { $0.id == selected.id }) {
                     selectedHabit = nil
                 }
             }
@@ -117,8 +114,10 @@ struct CalendarView: View {
     // MARK: - Grid
 
     private func gridDays() -> [Date?] {
-        guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: displayMonth)),
-              let range = cal.range(of: .day, in: .month, for: monthStart) else { return [] }
+        guard let monthStart = cal.date(
+            from: cal.dateComponents([.year, .month], from: displayMonth)
+        ),
+        let range = cal.range(of: .day, in: .month, for: monthStart) else { return [] }
 
         let firstWeekday = cal.component(.weekday, from: monthStart) - 1
         var days: [Date?] = Array(repeating: nil, count: firstWeekday)
@@ -128,7 +127,6 @@ struct CalendarView: View {
                 days.append(date)
             }
         }
-
         while days.count % 7 != 0 { days.append(nil) }
         return days
     }
@@ -136,19 +134,25 @@ struct CalendarView: View {
     @ViewBuilder
     private func dayCell(_ date: Date?) -> some View {
         if let date = date {
-            let status = selectedHabit != nil ? dayStatus(date) : allDayStatus(date)
             let dayNum = cal.component(.day, from: date)
             let isToday = cal.isDateInToday(date)
+            let status = selectedHabit != nil
+                ? singleDayStatus(date, habit: selectedHabit!)
+                : allDayStatus(date)
 
             ZStack {
                 Circle()
                     .fill(cellColor(status))
                     .frame(width: 34, height: 34)
                     .overlay(
-                        Circle().strokeBorder(isToday ? Theme.primary : Color.clear, lineWidth: 2)
+                        Circle().strokeBorder(
+                            isToday ? Theme.primary : Color.clear,
+                            lineWidth: 2
+                        )
                     )
                 Text("\(dayNum)")
-                    .font(.caption).fontWeight(isToday ? .bold : .regular)
+                    .font(.caption)
+                    .fontWeight(isToday ? .bold : .regular)
                     .foregroundColor(cellTextColor(status))
             }
             .frame(height: 38)
@@ -159,47 +163,50 @@ struct CalendarView: View {
 
     // MARK: - Day Status
 
-    private enum DayStatus { case completed, partial, missed, future, unscheduled }
+    private enum DayStatus {
+        case completed, partial, missed, future, unscheduled
+    }
 
-    private func dayStatus(_ date: Date) -> DayStatus {
-        guard let habit = selectedHabit else { return .unscheduled }
+    private func singleDayStatus(_ date: Date, habit: Habit) -> DayStatus {
         if date > Date() { return .future }
 
-        let log = appState.logs.first {
-            $0.habitId == habit.id && cal.isDate($0.date, inSameDayAs: date)
-        }
-        if let log = log { return log.completed ? .completed : .missed }
+        // check if this day is scheduled for the habit
+        let weekdayIndex = cal.component(.weekday, from: date) - 1
+        let dayName = dayNames[weekdayIndex]
+        guard habit.frequencyPattern.days.contains(dayName) else { return .unscheduled }
 
-        let weekday = cal.component(.weekday, from: date)
-        if !habit.scheduledDays.isEmpty && !habit.scheduledDays.contains(weekday) {
-            return .unscheduled
+        // check today_complete for today, otherwise unscheduled (we don't have history yet)
+        if cal.isDateInToday(date) {
+            return habit.todayComplete ? .completed : .missed
         }
-        return .missed
+
+        // for past days we'd need completion history — mark as unscheduled for now
+        // TODO: fetch completion history per habit for calendar view
+        return .unscheduled
     }
 
     private func allDayStatus(_ date: Date) -> DayStatus {
         if date > Date() { return .future }
         guard !appState.habits.isEmpty else { return .unscheduled }
 
-        let weekday = cal.component(.weekday, from: date)
+        let weekdayIndex = cal.component(.weekday, from: date) - 1
+        let dayName = dayNames[weekdayIndex]
 
-        // Only consider habits scheduled on this weekday
-        let scheduledHabits = appState.habits.filter { habit in
-            habit.scheduledDays.isEmpty || habit.scheduledDays.contains(weekday)
+        let scheduledHabits = appState.habits.filter {
+            $0.frequencyPattern.days.contains(dayName)
         }
         guard !scheduledHabits.isEmpty else { return .unscheduled }
 
-        let completedCount = scheduledHabits.filter { habit in
-            appState.logs.contains {
-                $0.habitId == habit.id &&
-                $0.completed &&
-                cal.isDate($0.date, inSameDayAs: date)
-            }
-        }.count
+        // for today we have live data
+        if cal.isDateInToday(date) {
+            let completedCount = scheduledHabits.filter { $0.todayComplete }.count
+            if completedCount == 0 { return .missed }
+            if completedCount == scheduledHabits.count { return .completed }
+            return .partial
+        }
 
-        if completedCount == 0 { return .missed }
-        if completedCount == scheduledHabits.count { return .completed }
-        return .partial
+        // TODO: fetch completion history for past days
+        return .unscheduled
     }
 
     private func cellColor(_ status: DayStatus) -> Color {
@@ -224,36 +231,49 @@ struct CalendarView: View {
 
     // MARK: - Stats
 
-    private func statsCard(habit: Habit) -> some View {
-        let monthLogs = appState.logsFor(habit: habit, in: displayMonth)
-        let completedCount = monthLogs.filter { $0.completed }.count
-        let totalScheduled = monthLogs.count
-        let rate = totalScheduled > 0 ? Int(Double(completedCount) / Double(totalScheduled) * 100) : 0
-
-        return HabitCard {
+    private func singleHabitStats(_ habit: Habit) -> some View {
+        HabitCard {
             HStack(spacing: 0) {
-                statItem(icon: "flame.fill", color: Theme.terracotta, value: "\(habit.streak)", label: "Streak")
+                statItem(
+                    icon: "flame.fill",
+                    color: Theme.terracotta,
+                    value: "\(habit.currentStreak)",
+                    label: "Streak"
+                )
                 Divider().frame(height: 40)
-                statItem(icon: "checkmark.circle.fill", color: Theme.sage, value: "\(completedCount)", label: "Done")
+                statItem(
+                    icon: "trophy.fill",
+                    color: Theme.sage,
+                    value: "\(habit.maxStreak)",
+                    label: "Best"
+                )
                 Divider().frame(height: 40)
-                statItem(icon: "percent", color: Theme.primary, value: "\(rate)%", label: "Rate")
+                statItem(
+                    icon: habit.todayComplete ? "checkmark.circle.fill" : "circle",
+                    color: habit.todayComplete ? Theme.sage : Theme.textSecondary,
+                    value: habit.todayComplete ? "Done" : "Pending",
+                    label: "Today"
+                )
             }
         }
     }
 
-    private var allStatsCard: some View {
-        let totalHabits = appState.habits.count
-        let completedToday = appState.habits.filter { appState.isCompleted(habit: $0) }.count
-        let allLogs = appState.habits.flatMap { appState.logsFor(habit: $0, in: displayMonth) }
-        let monthRate = allLogs.isEmpty ? 0 : Int(Double(allLogs.filter { $0.completed }.count) / Double(allLogs.count) * 100)
+    private var allHabitsStats: some View {
+        let total = appState.habits.count
+        let completedToday = appState.todaysHabits.filter { $0.todayComplete }.count
+        let totalToday = appState.todaysHabits.count
+        let bestStreak = appState.habits.map { $0.maxStreak }.max() ?? 0
 
         return HabitCard {
             HStack(spacing: 0) {
-                statItem(icon: "list.bullet", color: Theme.softBlue, value: "\(totalHabits)", label: "Habits")
+                statItem(icon: "list.bullet", color: Theme.softBlue,
+                         value: "\(total)", label: "Habits")
                 Divider().frame(height: 40)
-                statItem(icon: "checkmark.circle.fill", color: Theme.sage, value: "\(completedToday)", label: "Today")
+                statItem(icon: "checkmark.circle.fill", color: Theme.sage,
+                         value: "\(completedToday)/\(totalToday)", label: "Today")
                 Divider().frame(height: 40)
-                statItem(icon: "percent", color: Theme.primary, value: "\(monthRate)%", label: "This Month")
+                statItem(icon: "trophy.fill", color: Theme.terracotta,
+                         value: "\(bestStreak)", label: "Best Streak")
             }
         }
     }
