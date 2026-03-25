@@ -430,7 +430,7 @@ struct AIChatView: View {
 
                     Spacer()
 
-                    Text(planPreview.category.displayName)
+                    Text(planPreview.category.capitalized)
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundColor(Theme.primary)

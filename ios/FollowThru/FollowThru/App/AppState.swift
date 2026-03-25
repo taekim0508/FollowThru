@@ -464,7 +464,7 @@ final class AppState: ObservableObject {
                 model: response.model,
                 progressions: response.progressions
             )
-            _ = await refreshHabits()
+            await loadHabits()
             return response.habit
         } catch {
             aiError = errorMessage(from: error)
