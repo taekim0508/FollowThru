@@ -9,11 +9,10 @@ from typing import Any, Dict, List, Optional, Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..config import settings
-from ..models import AIChatMessage, AIIntakeDraft, AIPlanSnapshot, HabitCreate
+from ..models import AIChatMessage, AIHabitCandidate, AIIntakeDraft, AIPlanSnapshot, HabitCreate
 
 
 TIME_RE = re.compile(r"^\d{2}:\d{2}$")
-COUNT_PER_WEEK_RE = re.compile(r"(\d+)\s*(?:x|times?)\s*(?:a|per)?\s*week")
 MINUTES_RE = re.compile(r"\b(\d+)\s*(minutes?|mins?)\b")
 HOURS_RE = re.compile(r"\b(\d+)\s*(hours?|hrs?)\b")
 VALID_DAYS = {
@@ -27,8 +26,8 @@ VALID_DAYS = {
 }
 VALID_CATEGORIES = {"fitness", "study", "wellness", "reading", "sleep"}
 VALID_EXPERIENCE_LEVELS = {"beginner", "intermediate", "advanced"}
+VALID_SCHEDULE_MODES = {"daily", "weekdays", "weekends", "specific_days", "times_per_week"}
 ORDERED_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-_ALL_DAYS_PATTERN: dict = {"days": list(ORDERED_DAYS)}
 NUMBER_WORDS = {
     "zero": 0,
     "one": 1,
@@ -55,6 +54,89 @@ NUMBER_WORDS = {
     "forty": 40,
     "fifty": 50,
     "sixty": 60,
+}
+
+_HABIT_KEYWORD_MAP: Dict[str, List[str]] = {
+    "fitness": ["run", "running", "jog", "walk", "movement", "move more", "work out", "workout", "exercise", "gym", "lift", "yoga", "cycle", "swim", "swimming", "hike", "hiking"],
+    "study": ["study", "learn", "practice coding", "homework", "exam", "class", "course", "read textbook", "flashcard"],
+    "wellness": ["meditate", "meditation", "pray", "prayer", "journal", "journaling", "reflect", "reflection", "mindful", "wellness", "breathe", "breathing"],
+    "reading": ["read", "reading", "book", "pages", "novel", "chapter"],
+    "sleep": ["sleep", "bedtime", "wind down", "wind-down", "go to bed", "night routine", "wake up"],
+}
+
+MAX_RECENT_MESSAGES = 10
+MAX_PLAN_RETRIES = 2
+
+SENSITIVE_KEYWORDS: frozenset = frozenset([
+    "surgery", "injury", "injured", "recovering", "recovery from",
+    "diagnosed", "diagnosis", "chronic condition", "disability",
+    "depressed", "depression", "anxiety disorder", "suicidal", "self-harm", "self harm",
+    "eating disorder", "anorexia", "bulimia",
+    "addiction", "alcoholic",
+    "500 calories", "400 calories", "300 calories",
+])
+
+OFF_TOPIC_PHRASES: frozenset = frozenset([
+    "write code", "debug this", "fix my code", "write a function",
+    "what is the weather", "will it rain", "temperature outside",
+    "capital of", "who invented", "what year was",
+    "movie recommendation", "tv show recommendation", "what should i watch",
+    "order pizza", "best restaurant", "recommend a restaurant",
+    "tell me a joke", "write me a poem", "translate this",
+    "stock price", "cryptocurrency",
+])
+
+MULTI_HABIT_PATTERNS: List = [
+    re.compile(r"\band\s+(?:also\s+)?(?:i\s+(?:also\s+)?want|i\s+also|want\s+to)\b", re.IGNORECASE),
+    re.compile(r"\bas\s+well\s+as\b", re.IGNORECASE),
+    re.compile(r"\bin\s+addition\b", re.IGNORECASE),
+    re.compile(r"\balso\s+(?:want|plan|trying)\b", re.IGNORECASE),
+]
+
+REALISM_CAPS: Dict[str, Dict[str, Dict[str, int]]] = {
+    "fitness": {
+        "beginner":     {"max_duration_minutes": 60,  "max_days_per_week": 5},
+        "intermediate": {"max_duration_minutes": 90,  "max_days_per_week": 6},
+        "advanced":     {"max_duration_minutes": 180, "max_days_per_week": 7},
+    },
+    "study": {
+        "beginner":     {"max_duration_minutes": 90,  "max_days_per_week": 7},
+        "intermediate": {"max_duration_minutes": 180, "max_days_per_week": 7},
+        "advanced":     {"max_duration_minutes": 240, "max_days_per_week": 7},
+    },
+    "wellness": {
+        "beginner":     {"max_duration_minutes": 60,  "max_days_per_week": 7},
+        "intermediate": {"max_duration_minutes": 90,  "max_days_per_week": 7},
+        "advanced":     {"max_duration_minutes": 120, "max_days_per_week": 7},
+    },
+    "reading": {
+        "beginner":     {"max_duration_minutes": 90,  "max_days_per_week": 7},
+        "intermediate": {"max_duration_minutes": 120, "max_days_per_week": 7},
+        "advanced":     {"max_duration_minutes": 180, "max_days_per_week": 7},
+    },
+    "sleep": {
+        "beginner":     {"max_duration_minutes": 60, "max_days_per_week": 7},
+        "intermediate": {"max_duration_minutes": 60, "max_days_per_week": 7},
+        "advanced":     {"max_duration_minutes": 90, "max_days_per_week": 7},
+    },
+}
+
+# When experience level + category are known, these are sensible starting defaults
+# for frequency (days/week) to infer when frequency is not yet specified
+EXPERIENCE_FREQUENCY_DEFAULTS: Dict[str, Dict[str, int]] = {
+    "fitness":  {"beginner": 3, "intermediate": 4, "advanced": 5},
+    "study":    {"beginner": 5, "intermediate": 5, "advanced": 6},
+    "wellness": {"beginner": 7, "intermediate": 7, "advanced": 7},
+    "reading":  {"beginner": 5, "intermediate": 6, "advanced": 7},
+    "sleep":    {"beginner": 7, "intermediate": 7, "advanced": 7},
+}
+
+EXPERIENCE_DURATION_DEFAULTS: Dict[str, Dict[str, int]] = {
+    "fitness":  {"beginner": 20, "intermediate": 30, "advanced": 45},
+    "study":    {"beginner": 25, "intermediate": 45, "advanced": 60},
+    "wellness": {"beginner": 10, "intermediate": 15, "advanced": 20},
+    "reading":  {"beginner": 15, "intermediate": 20, "advanced": 30},
+    "sleep":    {"beginner": 15, "intermediate": 20, "advanced": 30},
 }
 
 
@@ -91,6 +173,7 @@ class HabitPlanLLMOutput(BaseModel):
     motivation_statement: Optional[str] = None
     progressions: List[ProgressionStep] = Field(default_factory=list)
     allows_photos: Optional[bool] = None
+    duration_minutes: Optional[int] = None  # filled by ambitious variant prompt; ignored for balanced
 
 
 class IntakeExtractionLLMOutput(BaseModel):
@@ -99,6 +182,8 @@ class IntakeExtractionLLMOutput(BaseModel):
     goal_summary: Optional[str] = None
     habit_description: Optional[str] = None
     frequency: Optional[str] = None
+    schedule_mode: Optional[str] = None
+    times_per_week: Optional[int] = None
     schedule_text: Optional[str] = None
     schedule_days: Optional[List[str]] = None
     duration_minutes: Optional[int] = None
@@ -121,9 +206,13 @@ class IntakeStepResult:
     assistant_message: str
     updated_draft: AIIntakeDraft
     missing_fields: List[str]
+    conflict_fields: List[str]
     ready_for_confirmation: bool
     confirmation_summary: Optional[str]
     needs_clarification: bool
+    needs_correction: bool = False
+    intent: str = "on_topic"
+    realism_warning: Optional[str] = None
 
 
 @dataclass
@@ -133,6 +222,58 @@ class RevisionResult:
     model: str
     plan_tweak: Optional[GeneratedHabitPlan] = None
     reopen_intake: Optional[IntakeStepResult] = None
+
+
+@dataclass
+class RealistCheckResult:
+    is_realistic: bool
+    warning_message: Optional[str]
+    suggested_duration_minutes: Optional[int] = None
+    suggested_days_per_week: Optional[int] = None
+
+
+@dataclass
+class HabitProposalResult:
+    action: str
+    provider: str
+    model: str
+    assistant_message: str
+    what_i_heard: Optional[str]
+    candidates: List[AIHabitCandidate]
+    needs_clarification: bool
+
+
+@dataclass
+class CandidateRefinementResult:
+    provider: str
+    model: str
+    assistant_message: str
+    candidate: AIHabitCandidate
+
+
+def _count_per_week_from_text(value: Any) -> Optional[int]:
+    if isinstance(value, int):
+        return max(1, min(value, 7))
+
+    text = (_normalize_text(value) or "").lower()
+    if not text:
+        return None
+
+    digit_match = re.search(r"\b(\d+)\s*(?:x|times?)\s*(?:a|per)?\s*week\b", text)
+    if digit_match:
+        return max(1, min(int(digit_match.group(1)), 7))
+
+    word_match = re.search(r"\b([a-z-]+)\s*(?:x|times?)\s*(?:a|per)?\s*week\b", text)
+    if word_match:
+        number = _number_from_words(word_match.group(1))
+        if number is not None:
+            return max(1, min(number, 7))
+
+    if "once a week" in text:
+        return 1
+    if "twice a week" in text:
+        return 2
+    return None
 
 
 def _provider_and_model() -> tuple[str, str]:
@@ -173,9 +314,22 @@ def _normalize_experience_level(value: Any) -> Optional[str]:
     if text in VALID_EXPERIENCE_LEVELS:
         return text
 
-    beginner_markers = ["beginner", "new", "novice", "never", "first time", "just starting", "starting out"]
-    intermediate_markers = ["intermediate", "some experience", "on and off", "used to", "have done this before"]
-    advanced_markers = ["advanced", "experienced", "expert", "for years", "very comfortable", "already consistent"]
+    beginner_markers = [
+        "beginner", "new to", "novice", "never", "first time", "just starting", "starting out",
+        "fresh start", "from scratch", "haven't done", "haven't tried", "brand new",
+        "no experience", "not done this", "not tried",
+    ]
+    intermediate_markers = [
+        "intermediate", "some experience", "on and off", "used to", "have done this before",
+        "done it before", "tried it before", "tried it a few", "done it a bit", "done it a couple",
+        "done this before", "here and there", "occasionally", "sometimes do", "a little experience",
+        "a bit of experience", "few times", "a few times", "dabbled",
+    ]
+    advanced_markers = [
+        "advanced", "experienced", "expert", "for years", "very comfortable", "already consistent",
+        "consistently do", "do it regularly", "do this regularly", "been doing", "been running",
+        "long time", "daily for", "weeks of", "months of",
+    ]
 
     if any(marker in text for marker in beginner_markers):
         return "beginner"
@@ -188,14 +342,7 @@ def _normalize_experience_level(value: Any) -> Optional[str]:
 
 def _infer_category_from_text(text: str) -> tuple[Optional[str], bool]:
     lowered = text.lower()
-    keyword_map = {
-        "fitness": ["run", "running", "jog", "walk", "work out", "workout", "exercise", "gym", "lift", "yoga", "cycle"],
-        "study": ["study", "learn", "practice coding", "homework", "exam", "class", "course"],
-        "wellness": ["meditate", "meditation", "pray", "prayer", "journal", "journaling", "reflect", "reflection", "mindful", "wellness"],
-        "reading": ["read", "reading", "book", "pages", "novel"],
-        "sleep": ["sleep", "bedtime", "wind down", "wind-down", "go to bed", "night routine"],
-    }
-    matches = [category for category, keywords in keyword_map.items() if any(keyword in lowered for keyword in keywords)]
+    matches = [cat for cat, keywords in _HABIT_KEYWORD_MAP.items() if any(kw in lowered for kw in keywords)]
     if len(matches) == 1:
         return matches[0], True
     if matches:
@@ -223,9 +370,9 @@ def _canonical_frequency(value: Any) -> Optional[str]:
     if "weekend" in text:
         return "weekends"
 
-    match = COUNT_PER_WEEK_RE.search(text)
-    if match:
-        return f"{match.group(1)} times per week"
+    count_per_week = _count_per_week_from_text(text)
+    if count_per_week:
+        return f"{count_per_week} times per week"
 
     explicit_days = [day for day in ORDERED_DAYS if day in text]
     if explicit_days:
@@ -236,6 +383,9 @@ def _canonical_frequency(value: Any) -> Optional[str]:
         return _normalize_text(value)
 
     return None
+
+
+_ALL_DAYS_PATTERN = {"days": list(ORDERED_DAYS)}
 
 
 def _frequency_from_text(text: str) -> tuple[str, Optional[dict]]:
@@ -251,9 +401,8 @@ def _frequency_from_text(text: str) -> tuple[str, Optional[dict]]:
     if explicit_days:
         return "custom", {"days": explicit_days}
 
-    match = COUNT_PER_WEEK_RE.search(lowered)
-    if match:
-        count = max(1, min(int(match.group(1)), 7))
+    count = _count_per_week_from_text(lowered)
+    if count:
         day_sets = {
             1: ["monday"],
             2: ["monday", "thursday"],
@@ -261,7 +410,7 @@ def _frequency_from_text(text: str) -> tuple[str, Optional[dict]]:
             4: ["monday", "tuesday", "thursday", "friday"],
             5: ["monday", "tuesday", "wednesday", "thursday", "friday"],
             6: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"],
-            7: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+            7: list(ORDERED_DAYS),
         }
         days = day_sets[count]
         return ("daily", _ALL_DAYS_PATTERN) if len(days) == 7 else ("custom", {"days": days})
@@ -299,7 +448,7 @@ def _schedule_text_from_value(value: Any) -> Optional[str]:
     frequency = _canonical_frequency(value)
     if not frequency:
         return None
-    if COUNT_PER_WEEK_RE.search(frequency):
+    if _count_per_week_from_text(frequency):
         return None
     if frequency == "every day":
         return "every day"
@@ -365,6 +514,293 @@ def _duration_minutes_from_text(value: Any) -> Optional[int]:
     return None
 
 
+def classify_intent_mock(message: str) -> str:
+    """Rule-based intent classification for use in mock/test mode."""
+    lowered = message.lower()
+
+    if any(kw in lowered for kw in SENSITIVE_KEYWORDS):
+        return "sensitive"
+
+    if any(phrase in lowered for phrase in OFF_TOPIC_PHRASES):
+        return "off_topic"
+
+    # Multi-habit: conjunction present AND multiple distinct habit categories hit
+    if any(pat.search(lowered) for pat in MULTI_HABIT_PATTERNS):
+        cat_hits = sum(1 for kws in _HABIT_KEYWORD_MAP.values() if any(kw in lowered for kw in kws))
+        if cat_hits >= 2:
+            return "multi_habit"
+
+    return "on_topic"
+
+
+def classify_intent_openai(message: str, recent_messages: Sequence[AIChatMessage], model: str) -> str:
+    """LLM-based intent classification. Falls back to on_topic on any error."""
+    history = [
+        {"role": m.role, "content": m.content}
+        for m in recent_messages[-4:]
+        if m.content.strip()
+    ]
+    prompt = (
+        f'Classify this user message in a habit coaching app.\n\nMessage: "{message}"\n\n'
+        'Return ONLY valid JSON: {"intent": "<label>"}\n\n'
+        "Labels:\n"
+        "- on_topic: discussing a habit to build (including emotional/motivational context)\n"
+        "- off_topic: completely unrelated to habits or self-improvement\n"
+        "- sensitive: mentions medical conditions, injury recovery, mental health concerns, "
+        "eating disorders, or substance abuse\n"
+        "- multi_habit: user mentions 2 or more distinct habits they want to build simultaneously"
+    )
+    try:
+        result = _call_openai_messages_for_json(
+            messages=[
+                {"role": "system", "content": "Classify user intent and return JSON only."},
+                *history,
+                {"role": "user", "content": prompt},
+            ],
+            model=model,
+        )
+        intent = str(result.get("intent", "on_topic")).lower()
+        return intent if intent in {"on_topic", "off_topic", "sensitive", "multi_habit"} else "on_topic"
+    except Exception:
+        return "on_topic"
+
+
+def classify_intent(message: str, recent_messages: Sequence[AIChatMessage]) -> str:
+    """Classify the intent of a user message. Returns one of: on_topic, off_topic, sensitive, multi_habit."""
+    provider, model = _provider_and_model()
+    if provider == "mock":
+        return classify_intent_mock(message)
+    if provider == "openai":
+        return classify_intent_openai(message, recent_messages, model)
+    return "on_topic"
+
+
+def check_realism(draft: "AIIntakeDraft") -> RealistCheckResult:
+    """Rule-based realism check. Returns a warning if the draft contains an unrealistic goal."""
+    exp = draft.experience_level
+    cat = draft.category
+    if not exp or not cat or exp not in VALID_EXPERIENCE_LEVELS or cat not in REALISM_CAPS:
+        return RealistCheckResult(is_realistic=True, warning_message=None)
+
+    caps = REALISM_CAPS[cat][exp]
+    max_duration = caps["max_duration_minutes"]
+    max_days = caps["max_days_per_week"]
+
+    issues: List[str] = []
+    suggested_duration: Optional[int] = None
+    suggested_days: Optional[int] = None
+
+    if draft.duration_minutes and draft.duration_minutes > max_duration:
+        suggested_duration = max_duration
+        issues.append(f"sessions of {draft.duration_minutes} minutes")
+
+    days_count = len(draft.schedule_days) if draft.schedule_days else None
+    if days_count and days_count > max_days:
+        suggested_days = max_days
+        issues.append(f"{days_count} days per week")
+
+    if not issues:
+        return RealistCheckResult(is_realistic=True, warning_message=None)
+
+    issue_text = " and ".join(issues)
+    parts = [f"That's ambitious! {issue_text.capitalize()} can be a lot to start with as a {exp}."]
+    suggestions: List[str] = []
+    if suggested_duration:
+        suggestions.append(f"sessions up to {suggested_duration} minutes")
+    if suggested_days:
+        suggestions.append(f"{suggested_days} days per week")
+    if suggestions:
+        parts.append(f"I'd suggest starting with {' and '.join(suggestions)} to build consistency first.")
+    parts.append("Want me to keep your original goal, or adjust it to something more manageable?")
+
+    return RealistCheckResult(
+        is_realistic=False,
+        warning_message=" ".join(parts),
+        suggested_duration_minutes=suggested_duration,
+        suggested_days_per_week=suggested_days,
+    )
+
+
+def _infer_defaults_from_experience(draft: "AIIntakeDraft") -> "AIIntakeDraft":
+    """
+    When both experience level and category are known, fill in sensible frequency/duration
+    defaults for any fields that are still missing. This reduces the number of clarifying
+    questions the user has to answer.
+    """
+    exp = draft.experience_level
+    cat = draft.category
+    if not exp or not cat or exp not in VALID_EXPERIENCE_LEVELS or cat not in EXPERIENCE_FREQUENCY_DEFAULTS:
+        return draft
+
+    duration = draft.duration_minutes
+    schedule_days = list(draft.schedule_days or [])
+    frequency = draft.frequency
+    schedule_text = draft.schedule_text
+
+    changed = False
+
+    # Fill in duration if missing
+    if not duration:
+        duration = EXPERIENCE_DURATION_DEFAULTS[cat][exp]
+        changed = True
+
+    # Fill in frequency/schedule if both are missing
+    if not frequency and not schedule_days:
+        days_count = EXPERIENCE_FREQUENCY_DEFAULTS[cat][exp]
+        day_sets: Dict[int, List[str]] = {
+            3: ["monday", "wednesday", "friday"],
+            4: ["monday", "tuesday", "thursday", "friday"],
+            5: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+            6: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"],
+            7: list(ORDERED_DAYS),
+        }
+        schedule_days = day_sets.get(days_count, ["monday", "wednesday", "friday"])
+        frequency = "every day" if days_count == 7 else f"{days_count} times per week"
+        schedule_text = _schedule_text_from_days(schedule_days)
+        changed = True
+
+    if not changed:
+        return draft
+
+    return AIIntakeDraft(
+        goal_summary=draft.goal_summary,
+        habit_description=draft.habit_description,
+        frequency=frequency,
+        schedule_text=schedule_text,
+        schedule_days=schedule_days,
+        duration_minutes=duration,
+        experience_level=draft.experience_level,
+        category=draft.category,
+        preferred_time=draft.preferred_time,
+        available_time=draft.available_time,
+    )
+
+
+def _validate_plan_fields(plan: HabitPlanLLMOutput) -> List[str]:
+    """Validate a generated plan and return a list of error strings (empty = valid)."""
+    errors: List[str] = []
+    if not (plan.habit_name or "").strip():
+        errors.append("habit_name is empty")
+    if not TIME_RE.match(plan.trigger_value or ""):
+        errors.append(f"trigger_value '{plan.trigger_value}' is not valid HH:MM format")
+    freq_type = (plan.frequency_type or "").lower()
+    if freq_type not in {"daily", "custom"}:
+        errors.append(f"frequency_type '{plan.frequency_type}' must be 'daily' or 'custom'")
+    if freq_type == "custom":
+        days = (plan.frequency_pattern or {}).get("days")
+        if not isinstance(days, list) or not days:
+            errors.append("frequency_pattern.days must be a non-empty list when frequency_type is 'custom'")
+        elif not all(isinstance(d, str) and d.lower() in VALID_DAYS for d in days):
+            errors.append("frequency_pattern.days contains invalid day names")
+    if not (plan.motivation_statement or "").strip():
+        errors.append("motivation_statement is empty")
+    if not plan.progressions:
+        errors.append("progressions must have at least one step")
+    return errors
+
+
+def _normalize_schedule_mode(value: Any) -> Optional[str]:
+    text = (_normalize_text(value) or "").lower()
+    if not text:
+        return None
+    alias_map = {
+        "daily": "daily",
+        "every day": "daily",
+        "weekdays": "weekdays",
+        "weekday": "weekdays",
+        "weekends": "weekends",
+        "weekend": "weekends",
+        "specific days": "specific_days",
+        "specific_days": "specific_days",
+        "specific days only": "specific_days",
+        "times per week": "times_per_week",
+        "times_per_week": "times_per_week",
+        "x times per week": "times_per_week",
+    }
+    if text in alias_map:
+        return alias_map[text]
+    if any(phrase in text for phrase in ["every day", "daily", "each day"]):
+        return "daily"
+    if any(phrase in text for phrase in ["weekday", "weekdays", "monday to friday", "mon-fri", "except weekends"]):
+        return "weekdays"
+    if "weekend" in text:
+        return "weekends"
+    if _count_per_week_from_text(text):
+        return "times_per_week"
+    if any(day in text for day in ORDERED_DAYS):
+        return "specific_days"
+    return text if text in VALID_SCHEDULE_MODES else None
+
+
+def _canonical_days_for_mode(mode: Optional[str]) -> List[str]:
+    if mode == "daily":
+        return ORDERED_DAYS.copy()
+    if mode == "weekdays":
+        return ORDERED_DAYS[:5]
+    if mode == "weekends":
+        return ORDERED_DAYS[5:]
+    return []
+
+
+def _derived_frequency(mode: Optional[str], times_per_week: Optional[int], schedule_days: List[str]) -> Optional[str]:
+    if mode == "daily":
+        return "every day"
+    if mode == "weekdays":
+        return "weekdays"
+    if mode == "weekends":
+        return "weekends"
+    if mode == "times_per_week" and times_per_week:
+        return f"{times_per_week} times per week"
+    if schedule_days:
+        return ", ".join(schedule_days)
+    return None
+
+
+def _derived_schedule_text(mode: Optional[str], times_per_week: Optional[int], schedule_days: List[str]) -> Optional[str]:
+    if mode == "daily":
+        return "every day"
+    if mode == "weekdays":
+        return "weekdays"
+    if mode == "weekends":
+        return "weekends"
+    if schedule_days:
+        return ", ".join(schedule_days)
+    if mode == "times_per_week" and times_per_week:
+        return f"{times_per_week} times per week"
+    return None
+
+
+def _first_conflict(draft: AIIntakeDraft) -> tuple[List[str], Optional[str]]:
+    days = draft.schedule_days
+    mode = draft.schedule_mode
+
+    if mode == "times_per_week" and draft.times_per_week and days and len(days) != draft.times_per_week:
+        return (
+            ["times_per_week", "schedule_days"],
+            f"You said {draft.times_per_week} times per week, but you selected {len(days)} days. Pick {draft.times_per_week} days or change the weekly count.",
+        )
+
+    if mode == "weekdays" and days and days != ORDERED_DAYS[:5]:
+        return (
+            ["schedule_mode", "schedule_days"],
+            "You picked weekdays, but the selected days do not match weekdays. Keep weekdays or switch to specific days.",
+        )
+
+    if mode == "weekends" and days and days != ORDERED_DAYS[5:]:
+        return (
+            ["schedule_mode", "schedule_days"],
+            "You picked weekends, but the selected days do not match weekends. Keep weekends or switch to specific days.",
+        )
+
+    if mode == "daily" and days and days != ORDERED_DAYS:
+        return (
+            ["schedule_mode", "schedule_days"],
+            "You picked every day, but the selected days do not cover the full week. Keep every day or switch to specific days.",
+        )
+
+    return ([], None)
+
+
 def _build_prompt(user_goal: str, category: str, context: Optional[dict]) -> str:
     ctx = _normalize_context(context)
     exp = ctx.get("experience_level", "beginner")
@@ -372,17 +808,26 @@ def _build_prompt(user_goal: str, category: str, context: Optional[dict]) -> str
     preferred_time = ctx.get("preferred_time", "flexible")
     habit_description = ctx.get("habit_description")
     frequency = ctx.get("frequency")
+    schedule_mode = ctx.get("schedule_mode")
+    times_per_week = ctx.get("times_per_week")
     schedule_text = ctx.get("schedule_text")
     schedule_days = ctx.get("schedule_days")
     duration_minutes = ctx.get("duration_minutes")
     critique = ctx.get("critique")
     current_plan = ctx.get("current_plan")
+    variant = ctx.get("variant", "balanced")
+    balanced_duration = ctx.get("balanced_duration")
+    balanced_days = ctx.get("balanced_days")
 
     extra_sections = []
     if habit_description:
         extra_sections.append(f'Habit Description: "{habit_description}"')
     if frequency:
         extra_sections.append(f'Desired Frequency: "{frequency}"')
+    if schedule_mode:
+        extra_sections.append(f'Desired Schedule Mode: "{schedule_mode}"')
+    if times_per_week:
+        extra_sections.append(f"Desired Times Per Week: {times_per_week}")
     if schedule_text:
         extra_sections.append(f'Desired Schedule: "{schedule_text}"')
     if schedule_days:
@@ -398,14 +843,56 @@ def _build_prompt(user_goal: str, category: str, context: Optional[dict]) -> str
     if extra_block:
         extra_block = f"{extra_block}\n"
 
+    # --- Ambitious variant: few-shot step-up guidance ---
+    if variant == "ambitious":
+        bal_days_str = ", ".join(balanced_days) if balanced_days else "not specified"
+        ambitious_section = f"""
+VARIANT: AMBITIOUS
+This is the ambitious version of the habit. The balanced version has:
+- Duration: {balanced_duration} minutes
+- Schedule: {bal_days_str}
+
+Your task: design a step-up that is noticeably more challenging but still realistic for
+someone at the {exp} level. The frequency has already been set to {times_per_week or "the schedule above"} — use that.
+Focus on choosing the right duration. Do NOT jump to maximum effort.
+
+Calibration examples (use these as a guide, not rigid rules):
+- Meditation, 10 min balanced → 15 min ambitious (+5 min; small habit, modest add)
+- Meditation, 20 min balanced → 28 min ambitious (+8 min)
+- Journaling, 10 min balanced → 15 min ambitious (+5 min)
+- Running, 15 min balanced → 30 min ambitious (+15 min; short start, bigger room to grow)
+- Running, 25 min balanced → 40 min ambitious (+15 min)
+- Running, 40 min balanced → 52 min ambitious (+12 min; already substantial)
+- Running, 50 min balanced → 62 min ambitious (+12 min; don't pile on too much)
+- Strength training, 20 min balanced → 35 min ambitious (+15 min)
+- Strength training, 35 min balanced → 50 min ambitious (+15 min)
+- Strength training, 50 min balanced → 60 min ambitious (+10 min)
+- Yoga, 30 min balanced → 45 min ambitious (+15 min)
+- Reading, 15 min balanced → 25 min ambitious (+10 min)
+- Reading, 30 min balanced → 40 min ambitious (+10 min)
+
+Key principles:
+- Shorter balanced durations get larger increments; longer ones get smaller increments.
+- Meditation/journaling/breathing: cap increment at ~10 min.
+- Fitness/strength/running: increment can be 12-20 min for short-to-mid balanced durations.
+- Never exceed what's realistic: a beginner's ambitious run shouldn't exceed 60 min.
+
+Output "duration_minutes" in the JSON with your chosen ambitious duration.
+""".strip()
+    else:
+        ambitious_section = ""
+
+    duration_output_field = '"duration_minutes": <integer>,' if variant == "ambitious" else ""
+
     return f"""
-You are a habit formation coach. Generate a practical starter habit plan.
+You are a habit formation coach. Generate a practical habit plan.
 
 User Goal: "{user_goal}"
 Category: {category}
 {extra_block}Experience Level: {exp}
 Available Time (minutes): {available_time}
 Preferred Time: {preferred_time}
+{ambitious_section}
 
 Return ONLY valid JSON (no markdown, no prose) with this shape:
 {{
@@ -419,7 +906,7 @@ Return ONLY valid JSON (no markdown, no prose) with this shape:
   "requires_quantity": false,
   "quantity_unit": null,
   "allows_notes": true,
-  "motivation_statement": "string",
+  "motivation_statement": "string",{duration_output_field}
   "progressions": [
     {{"week": 2, "description": "string"}},
     {{"week": 4, "description": "string"}}
@@ -427,11 +914,15 @@ Return ONLY valid JSON (no markdown, no prose) with this shape:
 }}
 
 Rules:
-- Start small for the user's experience level.
-- Respect available time.
-- The desired frequency, if provided, takes priority over inferring cadence from the goal.
+- Do not promise specific outcomes (weight loss, performance gains, etc.).
+- Do not cite specific statistics or research studies.
+- Start small for the user's experience level:
+  * beginner: 2-3 sessions per week, 15-25 minutes each.
+  * intermediate: 3-4 sessions per week, 25-40 minutes each.
+  * advanced: 4-5 sessions per week, 40-60 minutes each.
+- The desired frequency and duration, if provided, take priority over these defaults.
 - Respect the desired schedule and duration if they are provided.
-- Progressions should stay advisory and realistic.
+- Progressions should increase gradually — each step must be harder than the previous.
 - If preferred_time is morning/afternoon/evening, choose an appropriate time.
 - trigger_type must be "time".
 """.strip()
@@ -493,13 +984,22 @@ def _mock_plan_json(user_goal: str, category: str, context: Optional[dict]) -> d
     ctx = _normalize_context(context)
     preferred_time = str(ctx.get("preferred_time", "flexible"))
     trigger_value = _preferred_time_default(preferred_time)
+    schedule_mode = _normalize_schedule_mode(ctx.get("schedule_mode"))
+    times_per_week = _count_per_week_from_text(ctx.get("times_per_week"))
     schedule_text = _normalize_text(ctx.get("schedule_text"))
     schedule_days = _clean_schedule_days(ctx.get("schedule_days"))
-    frequency_text = schedule_text or _canonical_frequency(ctx.get("frequency")) or user_goal
+    if not schedule_days and schedule_mode in {"daily", "weekdays", "weekends"}:
+        schedule_days = _canonical_days_for_mode(schedule_mode)
+    frequency_text = (
+        _derived_frequency(schedule_mode, times_per_week, schedule_days)
+        or schedule_text
+        or _canonical_frequency(ctx.get("frequency"))
+        or user_goal
+    )
     frequency_type, frequency_pattern = _frequency_from_text(frequency_text)
     if schedule_days:
         frequency_type = "daily" if schedule_days == ORDERED_DAYS else "custom"
-        frequency_pattern = _ALL_DAYS_PATTERN if schedule_days == ORDERED_DAYS else {"days": schedule_days}
+        frequency_pattern = {"days": list(ORDERED_DAYS)} if schedule_days == ORDERED_DAYS else {"days": schedule_days}
     experience_level = _normalize_experience_level(ctx.get("experience_level")) or "beginner"
     habit_description = _normalize_text(ctx.get("habit_description"))
     duration_minutes = _duration_minutes_from_text(ctx.get("duration_minutes")) or 15
@@ -593,9 +1093,15 @@ def _clean_days(days: Any) -> Optional[dict]:
 
 def _frequency_from_context_or_goal(user_goal: str, context: Optional[dict]) -> tuple[str, Optional[dict]]:
     ctx = _normalize_context(context)
+    schedule_mode = _normalize_schedule_mode(ctx.get("schedule_mode"))
     schedule_days = _clean_schedule_days(ctx.get("schedule_days"))
+    if not schedule_days and schedule_mode in {"daily", "weekdays", "weekends"}:
+        schedule_days = _canonical_days_for_mode(schedule_mode)
     if schedule_days:
         return ("daily", None) if schedule_days == ORDERED_DAYS else ("custom", {"days": schedule_days})
+    derived_frequency = _derived_frequency(schedule_mode, _count_per_week_from_text(ctx.get("times_per_week")), schedule_days)
+    if derived_frequency:
+        return _frequency_from_text(derived_frequency)
     schedule_text = _schedule_text_from_value(ctx.get("schedule_text"))
     if schedule_text:
         return _frequency_from_text(schedule_text)
@@ -620,7 +1126,7 @@ def _normalize_llm_output(plan: HabitPlanLLMOutput, requested_category: str, use
         plan.frequency_pattern = inferred_pattern
 
     if plan.frequency_type == "daily":
-        plan.frequency_pattern = _ALL_DAYS_PATTERN
+        plan.frequency_pattern = {"days": list(ORDERED_DAYS)}
     else:
         cleaned = _clean_days(plan.frequency_pattern)
         if not cleaned:
@@ -656,33 +1162,710 @@ def _generate_plan(prompt: str, user_goal: str, category: str, context: Optional
         raise AIPipelineError(f"Unsupported category '{category}'")
 
     provider, model = _provider_and_model()
-    if provider == "mock":
-        raw_plan = _mock_plan_json(user_goal=user_goal, category=category, context=context)
-    elif provider == "openai":
-        raw_plan = _call_openai_for_json(prompt=prompt, model=model)
-    else:
-        raise AIPipelineConfigError(f"Unsupported AI_PROVIDER '{provider}'")
+    last_validation_errors: Optional[str] = None
 
-    try:
-        plan = HabitPlanLLMOutput.model_validate(raw_plan)
-    except Exception as exc:
-        raise AIPipelineGenerationError(f"LLM JSON did not match expected shape: {exc}") from exc
+    for attempt in range(MAX_PLAN_RETRIES + 1):
+        if provider == "mock":
+            raw_plan = _mock_plan_json(user_goal=user_goal, category=category, context=context)
+        elif provider == "openai":
+            retry_prompt = prompt
+            if last_validation_errors and attempt > 0:
+                retry_prompt = f"{prompt}\n\nPrevious attempt had validation errors — fix them:\n{last_validation_errors}"
+            raw_plan = _call_openai_for_json(prompt=retry_prompt, model=model)
+        else:
+            raise AIPipelineConfigError(f"Unsupported AI_PROVIDER '{provider}'")
 
-    plan = _normalize_llm_output(plan, requested_category=category, user_goal=user_goal, context=context)
-    habit_payload = _to_habit_create(plan)
+        try:
+            plan = HabitPlanLLMOutput.model_validate(raw_plan)
+        except Exception as exc:
+            last_validation_errors = str(exc)
+            if attempt == MAX_PLAN_RETRIES:
+                raise AIPipelineGenerationError(f"LLM JSON did not match expected shape: {exc}") from exc
+            continue
 
-    return GeneratedHabitPlan(
-        habit_payload=habit_payload,
-        progressions=[step.model_dump() for step in plan.progressions],
-        raw_plan=plan.model_dump(),
-        provider=provider,
-        model=model,
-    )
+        plan = _normalize_llm_output(plan, requested_category=category, user_goal=user_goal, context=context)
+        field_errors = _validate_plan_fields(plan)
+        if field_errors:
+            last_validation_errors = "; ".join(field_errors)
+            if attempt < MAX_PLAN_RETRIES and provider == "openai":
+                continue
+            # On final attempt or mock mode: fall back to mock plan rather than raising
+            if provider == "openai":
+                raw_plan = _mock_plan_json(user_goal=user_goal, category=category, context=context)
+                plan = HabitPlanLLMOutput.model_validate(raw_plan)
+                plan = _normalize_llm_output(plan, requested_category=category, user_goal=user_goal, context=context)
+
+        habit_payload = _to_habit_create(plan)
+        return GeneratedHabitPlan(
+            habit_payload=habit_payload,
+            progressions=[step.model_dump() for step in plan.progressions],
+            raw_plan=plan.model_dump(),
+            provider=provider,
+            model=model,
+        )
+
+    raise AIPipelineGenerationError("Plan generation failed after maximum retries")
 
 
 def generate_habit_plan(user_goal: str, category: str, context: Optional[dict] = None) -> GeneratedHabitPlan:
     prompt = _build_prompt(user_goal=user_goal, category=category, context=context)
     return _generate_plan(prompt=prompt, user_goal=user_goal, category=category, context=context)
+
+
+def _combined_user_idea(recent_messages: Sequence[AIChatMessage], latest_user_message: str) -> str:
+    # Reject-aware: only include user messages from AFTER the last rejection
+    # response so that off-topic / sensitive / multi-habit history doesn't
+    # contaminate the combined idea for a valid follow-up message.
+    _REJECTION_PHRASES = (
+        "i'm here to help you build habits",   # off_topic
+        "healthcare professional",              # sensitive
+        "health or medical considerations",     # sensitive
+        "one habit to start",                   # multi_habit
+        "focus on one habit",                   # multi_habit
+    )
+
+    messages = list(recent_messages[-MAX_RECENT_MESSAGES:])
+
+    # Find the last assistant rejection message index
+    last_rejection_idx: int = -1
+    for i, msg in enumerate(messages):
+        if msg.role == "assistant":
+            lowered = msg.content.lower()
+            if any(phrase in lowered for phrase in _REJECTION_PHRASES):
+                last_rejection_idx = i
+
+    # Only consider messages after the last rejection
+    relevant = messages[last_rejection_idx + 1:] if last_rejection_idx >= 0 else messages
+
+    parts: List[str] = []
+    for message in relevant:
+        if message.role != "user":
+            continue
+        normalized = _normalize_text(message.content)
+        if normalized:
+            parts.append(normalized)
+
+    latest = _normalize_text(latest_user_message)
+    if latest:
+        parts.append(latest)
+
+    if not parts:
+        return ""
+
+    unique_parts: List[str] = []
+    for part in parts:
+        if part not in unique_parts:
+            unique_parts.append(part)
+    return " ".join(unique_parts)
+
+
+def _has_prior_clarification(recent_messages: Sequence[AIChatMessage]) -> bool:
+    return any(
+        message.role == "assistant" and "what kind of change" in message.content.lower()
+        for message in recent_messages[-6:]
+    )
+
+
+def _has_prior_experience_ask(recent_messages: Sequence[AIChatMessage]) -> bool:
+    """Returns True if the assistant has already asked about experience level."""
+    experience_ask_phrases = [
+        "experience with this",
+        "just getting started",
+        "tried it before",
+        "experience level",
+        "beginner or",
+        "new to this",
+        # phrases from the actual question generated by _needs_idea_clarification
+        "worked on something like this",
+        "fresh start for you",
+        "have you worked",
+        "worked on this",
+        "done this before",
+        "tried this before",
+    ]
+    return any(
+        message.role == "assistant"
+        and any(phrase in message.content.lower() for phrase in experience_ask_phrases)
+        for message in recent_messages[-6:]
+    )
+
+
+def _has_prior_time_ask(recent_messages: Sequence[AIChatMessage]) -> bool:
+    """Returns True if the assistant has already asked about time of day."""
+    time_ask_phrases = [
+        "time of day",
+        "morning or",
+        "part of your day",
+        "fit into your day",
+        "what time",
+        "before or after",
+    ]
+    return any(
+        message.role == "assistant"
+        and any(phrase in message.content.lower() for phrase in time_ask_phrases)
+        for message in recent_messages[-6:]
+    )
+
+
+def _has_prior_obstacle_ask(recent_messages: Sequence[AIChatMessage]) -> bool:
+    """Returns True if the assistant has already asked about past obstacles or schedule pressures."""
+    obstacle_ask_phrases = [
+        "get in the way",
+        "gotten in the way",  # past tense form used in the actual question
+        "in the way",
+        "stopped you",
+        "made it hard",
+        "biggest challenge",
+        "obstacle",
+        "busy week",
+        "fitting it in",
+        "tried to build a habit",
+    ]
+    return any(
+        message.role == "assistant"
+        and any(phrase in message.content.lower() for phrase in obstacle_ask_phrases)
+        for message in recent_messages[-6:]
+    )
+
+
+def _count_clarification_exchanges(recent_messages: Sequence[AIChatMessage]) -> int:
+    """Count how many back-and-forth clarification rounds have occurred."""
+    count = 0
+    for msg in recent_messages:
+        if msg.role == "assistant":
+            lowered = msg.content.lower()
+            # Detect any clarification question (ends with "?")
+            if "?" in lowered:
+                count += 1
+    return count
+
+
+def _has_time_of_day_context(idea: str) -> bool:
+    lowered = idea.lower()
+    return any(token in lowered for token in [
+        "morning", "afternoon", "evening", "night", "before bed", "after work",
+        "before work", "lunch", "midday", "start my day", "wind down",
+    ])
+
+
+def _has_obstacle_context(idea: str) -> bool:
+    lowered = idea.lower()
+    return any(token in lowered for token in [
+        "struggle", "hard", "difficult", "challenge", "fail", "stop",
+        "quit", "busy", "tired", "motivation", "consistent", "consistency",
+        "obstacle", "problem", "issue", "barrier", "distract", "anxious",
+        "stress", "overwhelm", "forget", "skip", "miss", "can't", "cannot",
+        "don't", "never manage", "keep failing", "keep skipping",
+    ])
+
+
+def _needs_idea_clarification(idea: str, recent_messages: Sequence[AIChatMessage]) -> Optional[str]:
+    normalized = _normalize_text(idea) or ""
+    if not normalized:
+        return "Tell me what kind of change you want in your life, what you’re struggling with, and anything that would make the habit realistic or unrealistic for you."
+
+    lowered = normalized.lower()
+    vague_markers = {
+        "be better",
+        "get better",
+        "be healthier",
+        "improve my life",
+        "do better",
+        "be more consistent",
+    }
+    if len(normalized.split()) <= 4 or lowered in vague_markers:
+        return "What kind of change are you hoping for day to day, and is there anything that would make the habit realistic or unrealistic for you?"
+
+    # Count prior clarification exchanges — generate after ~3 rounds regardless
+    exchange_count = _count_clarification_exchanges(recent_messages)
+    if exchange_count >= 3:
+        return None
+
+    # Priority queue of missing context (most important first)
+
+    # 1. Experience level — critical for calibrating intensity
+    if not _normalize_experience_level(normalized) and not _has_prior_experience_ask(recent_messages):
+        return "Have you worked on something like this before, or would this be a fresh start for you?"
+
+    # 2. Time of day — affects habit stickiness
+    if not _has_time_of_day_context(normalized) and not _has_prior_time_ask(recent_messages) and exchange_count >= 1:
+        return "Is there a part of your day that tends to work better for this — morning, evening, or somewhere in between?"
+
+    # 3. Past obstacles — helps calibrate realism
+    if not _has_obstacle_context(normalized) and not _has_prior_obstacle_ask(recent_messages) and exchange_count >= 2:
+        return "What’s gotten in the way in the past when you’ve tried to build a habit like this?"
+
+    return None
+
+
+def _infer_preferred_time_from_text(text: str) -> str:
+    lowered = text.lower()
+    if any(token in lowered for token in ["morning", "before work", "start my day"]):
+        return "morning"
+    if any(token in lowered for token in ["afternoon", "lunch break", "midday"]):
+        return "afternoon"
+    if any(token in lowered for token in ["evening", "after work", "night", "before bed", "wind-down", "wind down"]):
+        return "evening"
+    return "flexible"
+
+
+def _inferred_experience_from_idea(idea: str) -> str:
+    return _normalize_experience_level(idea) or "beginner"
+
+
+def _default_duration_for_category(category: str) -> int:
+    return {
+        "fitness": 15,
+        "study": 20,
+        "wellness": 10,
+        "reading": 15,
+        "sleep": 20,
+    }.get(category, 15)
+
+
+def _proposal_variants(
+    category: str,
+    idea: str,
+    experience_level: str,
+    duration_hint: Optional[int],
+    schedule_mode_hint: Optional[str],
+    times_per_week_hint: Optional[int],
+    schedule_days_hint: List[str],
+) -> List[Dict[str, Any]]:
+    """Produce two plan variants: Balanced (sustainable default) and Ambitious (max for experience level)."""
+
+    # --- Experience-aware defaults and caps ---
+    exp = experience_level if experience_level in VALID_EXPERIENCE_LEVELS else "beginner"
+    cat = category if category in EXPERIENCE_DURATION_DEFAULTS else "wellness"
+
+    default_duration = EXPERIENCE_DURATION_DEFAULTS[cat][exp]
+    default_freq = EXPERIENCE_FREQUENCY_DEFAULTS[cat][exp]
+    caps = REALISM_CAPS[cat][exp]
+
+    # Balanced: use experience defaults; honor user hint if within caps
+    bal_duration = duration_hint if (duration_hint and duration_hint <= caps["max_duration_minutes"]) else default_duration
+    bal_freq = times_per_week_hint if (times_per_week_hint and times_per_week_hint <= caps["max_days_per_week"]) else default_freq
+
+    # Ambitious: frequency = balanced + 1 session (capped at max); duration is chosen by GPT via few-shot prompt
+    amb_freq = min(bal_freq + 1, caps["max_days_per_week"])
+
+    # --- Resolve schedule mode ---
+    base_schedule_mode = schedule_mode_hint
+    base_schedule_days = list(schedule_days_hint) if schedule_days_hint else []
+
+    if not base_schedule_mode:
+        if cat in {"wellness", "reading", "sleep"}:
+            base_schedule_mode = "daily"
+        else:
+            base_schedule_mode = "times_per_week"
+    elif base_schedule_mode == "specific_days" and not base_schedule_days:
+        base_schedule_mode = "times_per_week"
+
+    def _days_for_freq(n: int) -> List[str]:
+        # Pick evenly-spaced days for a given frequency
+        if n >= 7:
+            return ORDERED_DAYS.copy()
+        step = max(1, 7 // n)
+        return ORDERED_DAYS[:n * step:step][:n]
+
+    # Balanced schedule
+    if base_schedule_mode == "daily":
+        bal_mode, bal_days, bal_tpw = "daily", ORDERED_DAYS.copy(), None
+    elif base_schedule_mode == "weekdays":
+        bal_mode, bal_days, bal_tpw = "weekdays", ORDERED_DAYS[:5], None
+    elif base_schedule_days:
+        bal_mode = "specific_days"
+        bal_days = base_schedule_days[:bal_freq]
+        bal_tpw = None
+    else:
+        bal_mode = "times_per_week"
+        bal_tpw = bal_freq
+        bal_days = _days_for_freq(bal_freq)
+
+    # Ambitious schedule — add 1 session; only force daily if already daily or already at daily frequency
+    if base_schedule_mode == "daily" or bal_freq >= 7:
+        amb_mode, amb_days, amb_tpw = "daily", ORDERED_DAYS.copy(), None
+    elif base_schedule_mode == "weekdays":
+        # weekdays already 5x; ambitious stays weekdays (adding daily would only add weekends)
+        amb_mode, amb_days, amb_tpw = "weekdays", ORDERED_DAYS[:5], None
+    else:
+        amb_mode = bal_mode
+        amb_tpw = amb_freq if amb_mode == "times_per_week" else None
+        amb_days = _days_for_freq(amb_freq)
+
+    return [
+        {
+            "label": "balanced",
+            "duration_minutes": bal_duration,
+            "schedule_mode": bal_mode,
+            "times_per_week": bal_tpw,
+            "schedule_days": bal_days,
+            "rationale": "A sustainable plan for building the habit consistently without burning out.",
+        },
+        {
+            "label": "ambitious",
+            "duration_minutes": None,  # GPT determines this via few-shot prompt
+            "balanced_duration": bal_duration,  # passed as context to GPT
+            "schedule_mode": amb_mode,
+            "times_per_week": amb_tpw,
+            "schedule_days": amb_days,
+            "rationale": "A step up from the balanced plan — more sessions and more time, calibrated to your experience.",
+        },
+    ]
+
+
+def _habit_title_variant(base_title: str, label: str) -> str:
+    if label == "ambitious":
+        return f"{base_title} (Ambitious)"
+    return base_title
+
+
+def _schedule_summary_from_payload(habit_payload: HabitCreate) -> str:
+    if habit_payload.frequency_type == "daily":
+        return "Every day"
+    days = _clean_schedule_days((habit_payload.frequency_pattern or {}).get("days"))
+    if not days:
+        return "Custom schedule"
+    if days == ORDERED_DAYS:
+        return "Every day"
+    if days == ORDERED_DAYS[:5]:
+        return "Weekdays"
+    if days == ORDERED_DAYS[5:]:
+        return "Weekends"
+    return ", ".join(day.title() for day in days)
+
+
+def _candidate_from_generated_plan(plan: GeneratedHabitPlan, duration_minutes: int, rationale: str, label: str) -> AIHabitCandidate:
+    habit_payload = plan.habit_payload.model_copy(deep=True)
+    habit_payload.name = _habit_title_variant(habit_payload.name, label)
+    return AIHabitCandidate(
+        title=habit_payload.name,
+        category=habit_payload.category,
+        description=habit_payload.description,
+        suggested_schedule=_schedule_summary_from_payload(habit_payload),
+        duration_minutes=duration_minutes,
+        rationale=rationale,
+        variant=label,
+        habit_payload=habit_payload,
+        progressions=plan.progressions,
+    )
+
+
+def _what_i_heard_summary(idea: str) -> str:
+    summary = _summarize_goal(idea)
+    return f"You want a realistic habit built around: {summary}"
+
+
+def propose_habit_candidates(
+    recent_messages: Sequence[AIChatMessage],
+    latest_user_message: str,
+) -> HabitProposalResult:
+    provider, model = _provider_and_model()
+
+    # 1. Cap context window — never process more than MAX_RECENT_MESSAGES
+    capped_messages = list(recent_messages[-MAX_RECENT_MESSAGES:])
+
+    combined_idea = _combined_user_idea(capped_messages, latest_user_message)
+
+    # 2. Intent classification — short-circuit before doing any LLM work
+    intent = classify_intent(latest_user_message, capped_messages)
+    if intent == "off_topic":
+        return HabitProposalResult(
+            action="off_topic",
+            provider=provider,
+            model=model,
+            assistant_message="I'm here to help you build habits. What kind of change do you want to make in your daily routine?",
+            what_i_heard=None,
+            candidates=[],
+            needs_clarification=True,
+        )
+    if intent == "sensitive":
+        return HabitProposalResult(
+            action="sensitive",
+            provider=provider,
+            model=model,
+            assistant_message=(
+                "It sounds like there may be some health or medical considerations here. "
+                "I'd recommend checking in with a healthcare professional first — "
+                "once you have that guidance, I'm happy to help you build a habit around it."
+            ),
+            what_i_heard=None,
+            candidates=[],
+            needs_clarification=True,
+        )
+    if intent == "multi_habit":
+        return HabitProposalResult(
+            action="multi_habit",
+            provider=provider,
+            model=model,
+            assistant_message=(
+                "Building several habits at once makes it harder for any of them to stick. "
+                "Let's focus on one habit to start — which one matters most to you right now?"
+            ),
+            what_i_heard=None,
+            candidates=[],
+            needs_clarification=True,
+        )
+
+    # 3. Clarification check (vague input, missing experience level)
+    clarification = _needs_idea_clarification(combined_idea, capped_messages)
+    if clarification:
+        return HabitProposalResult(
+            action="clarify",
+            provider=provider,
+            model=model,
+            assistant_message=clarification,
+            what_i_heard=_what_i_heard_summary(combined_idea) if combined_idea else None,
+            candidates=[],
+            needs_clarification=True,
+        )
+
+    inferred_category, confident_category = _infer_category_from_text(combined_idea)
+    category = inferred_category or "wellness"
+    if not confident_category and not inferred_category:
+        category = "wellness"
+
+    duration_hint = _duration_minutes_from_text(combined_idea)
+    schedule_mode_hint = _normalize_schedule_mode(combined_idea)
+    times_per_week_hint = _count_per_week_from_text(combined_idea)
+    schedule_days_hint = _schedule_days_from_text(combined_idea)
+    experience_level = _inferred_experience_from_idea(combined_idea)
+    preferred_time = _infer_preferred_time_from_text(combined_idea)
+
+    # 4. Apply REALISM_CAPS — clamp user-stated hints to experience-level ceilings
+    if experience_level in VALID_EXPERIENCE_LEVELS and category in REALISM_CAPS:
+        caps = REALISM_CAPS[category][experience_level]
+        if duration_hint and duration_hint > caps["max_duration_minutes"]:
+            duration_hint = caps["max_duration_minutes"]
+        if times_per_week_hint and times_per_week_hint > caps["max_days_per_week"]:
+            times_per_week_hint = caps["max_days_per_week"]
+        if schedule_days_hint and len(schedule_days_hint) > caps["max_days_per_week"]:
+            schedule_days_hint = schedule_days_hint[: caps["max_days_per_week"]]
+
+    candidates: List[AIHabitCandidate] = []
+    balanced_duration_generated: Optional[int] = None  # track for ambitious context
+    balanced_days_generated: Optional[List[str]] = None  # track for ambitious context
+
+    for variant in _proposal_variants(
+        category=category,
+        idea=combined_idea,
+        experience_level=experience_level,
+        duration_hint=duration_hint,
+        schedule_mode_hint=schedule_mode_hint,
+        times_per_week_hint=times_per_week_hint,
+        schedule_days_hint=schedule_days_hint,
+    ):
+        is_ambitious = variant["label"] == "ambitious"
+
+        # For ambitious: duration is None — GPT will choose it via few-shot prompt
+        # For balanced: use the pre-computed duration
+        context_duration = variant["duration_minutes"]  # None for ambitious
+
+        context = {
+            "experience_level": experience_level,
+            "available_time": context_duration or (balanced_duration_generated or variant.get("balanced_duration")),
+            "preferred_time": preferred_time,
+            "habit_description": _normalize_text(combined_idea),
+            "schedule_mode": variant["schedule_mode"],
+            "times_per_week": variant["times_per_week"],
+            "schedule_days": variant["schedule_days"],
+            "schedule_text": _derived_schedule_text(
+                variant["schedule_mode"],
+                variant["times_per_week"],
+                variant["schedule_days"],
+            ),
+            "duration_minutes": context_duration,
+            # Ambitious-specific: tell GPT which variant this is and the balanced baseline
+            "variant": variant["label"],
+            "balanced_duration": balanced_duration_generated or variant.get("balanced_duration"),
+            "balanced_days": balanced_days_generated if is_ambitious else variant["schedule_days"],
+        }
+
+        generated = generate_habit_plan(
+            user_goal=combined_idea,
+            category=category,
+            context=context,
+        )
+
+        # For ambitious: use GPT's chosen duration if it output one; cap at REALISM_CAPS
+        if is_ambitious:
+            gpg_duration = generated.raw_plan.get("duration_minutes")
+            if gpg_duration and isinstance(gpg_duration, int) and gpg_duration > 0:
+                # Respect REALISM_CAPS upper bound
+                max_dur = caps["max_duration_minutes"] if experience_level in VALID_EXPERIENCE_LEVELS and category in REALISM_CAPS else 120
+                actual_duration = min(gpg_duration, max_dur)
+            else:
+                # Fallback: balanced + a modest category-aware increment
+                base = balanced_duration_generated or variant.get("balanced_duration") or 20
+                fallback_increment = 10 if category in {"wellness", "reading", "sleep"} else 15
+                actual_duration = min(base + fallback_increment, caps["max_duration_minutes"])
+        else:
+            actual_duration = variant["duration_minutes"]
+            balanced_duration_generated = actual_duration  # save for ambitious context
+            balanced_days_generated = list(variant["schedule_days"])  # save for ambitious context
+
+        candidates.append(
+            _candidate_from_generated_plan(
+                generated,
+                duration_minutes=actual_duration,
+                rationale=variant["rationale"],
+                label=variant["label"],
+            )
+        )
+
+    return HabitProposalResult(
+        action="propose",
+        provider=provider,
+        model=model,
+        assistant_message="Here are a few habit options I think fit what you described. Pick one to use as-is, or refine one if you want it adjusted.",
+        what_i_heard=_what_i_heard_summary(combined_idea),
+        candidates=candidates,
+        needs_clarification=False,
+    )
+
+
+def _candidate_schedule_context(candidate: AIHabitCandidate) -> Dict[str, Any]:
+    habit_payload = candidate.habit_payload
+    schedule_days = _clean_schedule_days((habit_payload.frequency_pattern or {}).get("days"))
+    if habit_payload.frequency_type == "daily":
+        schedule_mode = "daily"
+        schedule_days = ORDERED_DAYS.copy()
+        times_per_week = None
+    elif schedule_days == ORDERED_DAYS[:5]:
+        schedule_mode = "weekdays"
+        times_per_week = None
+    elif schedule_days == ORDERED_DAYS[5:]:
+        schedule_mode = "weekends"
+        times_per_week = None
+    elif schedule_days:
+        schedule_mode = "specific_days"
+        times_per_week = len(schedule_days)
+    else:
+        schedule_mode = "daily"
+        times_per_week = None
+
+    return {
+        "schedule_mode": schedule_mode,
+        "times_per_week": times_per_week,
+        "schedule_days": schedule_days,
+        "schedule_text": _derived_schedule_text(schedule_mode, times_per_week, schedule_days),
+    }
+
+
+def _apply_refinement_to_context(base_context: Dict[str, Any], refinement: str) -> Dict[str, Any]:
+    updated = dict(base_context)
+    lowered = refinement.lower()
+
+    explicit_schedule_mode = _normalize_schedule_mode(refinement)
+    explicit_times = _count_per_week_from_text(refinement)
+    explicit_days = _schedule_days_from_text(refinement)
+    explicit_duration = _duration_minutes_from_text(refinement)
+    explicit_preferred_time = _infer_preferred_time_from_text(refinement)
+
+    if explicit_schedule_mode:
+        updated["schedule_mode"] = explicit_schedule_mode
+    if explicit_times:
+        updated["times_per_week"] = explicit_times
+    if explicit_days:
+        updated["schedule_days"] = explicit_days
+
+    if explicit_duration:
+        updated["duration_minutes"] = explicit_duration
+        updated["available_time"] = explicit_duration
+
+    if explicit_preferred_time != "flexible":
+        updated["preferred_time"] = explicit_preferred_time
+
+    if "easier" in lowered:
+        current_duration = _duration_minutes_from_text(updated.get("duration_minutes")) or 15
+        updated["duration_minutes"] = max(5, current_duration - 5)
+        updated["available_time"] = updated["duration_minutes"]
+    elif "more realistic" in lowered:
+        current_duration = _duration_minutes_from_text(updated.get("duration_minutes")) or 15
+        updated["duration_minutes"] = max(10, min(current_duration, 20))
+        updated["available_time"] = updated["duration_minutes"]
+
+    schedule_mode = _normalize_schedule_mode(updated.get("schedule_mode"))
+    schedule_days = _clean_schedule_days(updated.get("schedule_days"))
+    times_per_week = _count_per_week_from_text(updated.get("times_per_week"))
+
+    if schedule_mode == "daily":
+        schedule_days = ORDERED_DAYS.copy()
+        times_per_week = None
+    elif schedule_mode == "weekdays":
+        schedule_days = ORDERED_DAYS[:5]
+        times_per_week = None
+    elif schedule_mode == "weekends":
+        schedule_days = ORDERED_DAYS[5:]
+        times_per_week = None
+    elif schedule_mode == "times_per_week" and not times_per_week:
+        times_per_week = len(schedule_days) if schedule_days else 3
+
+    updated["schedule_mode"] = schedule_mode
+    updated["times_per_week"] = times_per_week
+    updated["schedule_days"] = schedule_days
+    updated["schedule_text"] = _derived_schedule_text(schedule_mode, times_per_week, schedule_days)
+    return updated
+
+
+def refine_habit_candidate(
+    idea: str,
+    selected_candidate: AIHabitCandidate,
+    refinement: str,
+    recent_messages: Sequence[AIChatMessage],
+) -> CandidateRefinementResult:
+    _ = recent_messages
+    base_context = {
+        "experience_level": "beginner",
+        "available_time": selected_candidate.duration_minutes,
+        "preferred_time": _infer_preferred_time_from_text(" ".join([idea, refinement])),
+        "habit_description": selected_candidate.description,
+        "duration_minutes": selected_candidate.duration_minutes,
+        "critique": refinement,
+        "current_plan": {
+            "habit_name": selected_candidate.title,
+            "description": selected_candidate.description,
+            "suggested_schedule": selected_candidate.suggested_schedule,
+        },
+    }
+    base_context.update(_candidate_schedule_context(selected_candidate))
+    updated_context = _apply_refinement_to_context(base_context, refinement)
+
+    generated = generate_habit_plan(
+        user_goal=idea,
+        category=selected_candidate.category,
+        context=updated_context,
+    )
+    refined_candidate = _candidate_from_generated_plan(
+        generated,
+        duration_minutes=updated_context["duration_minutes"],
+        rationale="This version adjusts the habit around your feedback while keeping it realistic.",
+        label="balanced",
+    )
+    return CandidateRefinementResult(
+        provider=generated.provider,
+        model=generated.model,
+        assistant_message="I adjusted that option. See if this version feels closer to what you want.",
+        candidate=refined_candidate,
+    )
+
+
+def create_habit_from_candidate(candidate: AIHabitCandidate) -> GeneratedHabitPlan:
+    provider, model = _provider_and_model()
+    return GeneratedHabitPlan(
+        habit_payload=candidate.habit_payload,
+        progressions=candidate.progressions,
+        raw_plan={
+            "habit_name": candidate.title,
+            "category": candidate.category,
+            "description": candidate.description,
+            "suggested_schedule": candidate.suggested_schedule,
+            "duration_minutes": candidate.duration_minutes,
+            "rationale": candidate.rationale,
+        },
+        provider=provider,
+        model=model,
+    )
 
 
 def _draft_user_goal(draft: AIIntakeDraft) -> str:
@@ -705,6 +1888,8 @@ def _draft_context(draft: AIIntakeDraft, critique: Optional[str] = None, current
         "preferred_time": draft.preferred_time,
         "habit_description": draft.habit_description,
         "frequency": draft.frequency,
+        "schedule_mode": draft.schedule_mode,
+        "times_per_week": draft.times_per_week,
         "schedule_text": draft.schedule_text,
         "schedule_days": draft.schedule_days,
         "duration_minutes": draft.duration_minutes,
@@ -719,20 +1904,33 @@ def _draft_context(draft: AIIntakeDraft, critique: Optional[str] = None, current
 def _validated_draft(draft: AIIntakeDraft) -> AIIntakeDraft:
     normalized_goal = _normalize_text(draft.goal_summary)
     normalized_description = _normalize_text(draft.habit_description)
-    normalized_frequency = _canonical_frequency(draft.frequency)
+    explicit_frequency = _canonical_frequency(draft.frequency)
+    normalized_schedule_mode = _normalize_schedule_mode(draft.schedule_mode)
+    normalized_times_per_week = _count_per_week_from_text(draft.times_per_week)
     normalized_schedule_days = _clean_schedule_days(draft.schedule_days)
     normalized_schedule_text = _schedule_text_from_value(draft.schedule_text)
+    if not normalized_schedule_mode:
+        normalized_schedule_mode = _normalize_schedule_mode(normalized_schedule_text) or _normalize_schedule_mode(explicit_frequency)
+    if not normalized_times_per_week:
+        normalized_times_per_week = _count_per_week_from_text(normalized_schedule_text) or _count_per_week_from_text(explicit_frequency)
     if not normalized_schedule_days and normalized_schedule_text:
         normalized_schedule_days = _schedule_days_from_text(normalized_schedule_text)
-    if not normalized_schedule_days and normalized_frequency:
-        normalized_schedule_days = _schedule_days_from_text(normalized_frequency)
-    if not normalized_schedule_text and normalized_schedule_days:
-        normalized_schedule_text = _schedule_text_from_days(normalized_schedule_days)
+    if not normalized_schedule_days and explicit_frequency:
+        normalized_schedule_days = _schedule_days_from_text(explicit_frequency)
+    if not normalized_schedule_mode and normalized_schedule_days:
+        normalized_schedule_mode = "specific_days"
+    if normalized_schedule_mode in {"daily", "weekdays", "weekends"} and not normalized_schedule_days:
+        normalized_schedule_days = _canonical_days_for_mode(normalized_schedule_mode)
+    if not normalized_schedule_text:
+        normalized_schedule_text = _derived_schedule_text(normalized_schedule_mode, normalized_times_per_week, normalized_schedule_days)
+    normalized_frequency = _derived_frequency(normalized_schedule_mode, normalized_times_per_week, normalized_schedule_days) or explicit_frequency
 
     normalized = AIIntakeDraft(
         goal_summary=normalized_goal,
         habit_description=normalized_description,
         frequency=normalized_frequency,
+        schedule_mode=normalized_schedule_mode,
+        times_per_week=normalized_times_per_week,
         schedule_text=normalized_schedule_text,
         schedule_days=normalized_schedule_days,
         duration_minutes=_duration_minutes_from_text(draft.duration_minutes),
@@ -756,16 +1954,18 @@ def missing_fields_for_draft(draft: AIIntakeDraft) -> List[str]:
     missing: List[str] = []
     if not normalized.goal_summary:
         missing.append("goal_summary")
-    if not normalized.frequency:
-        missing.append("frequency")
-    if not normalized.schedule_days:
-        missing.append("schedule")
-    if not normalized.duration_minutes:
-        missing.append("duration_minutes")
-    if not normalized.experience_level:
-        missing.append("experience_level")
     if not normalized.category:
         missing.append("category")
+    if not normalized.experience_level:
+        missing.append("experience_level")
+    if not normalized.duration_minutes:
+        missing.append("duration_minutes")
+    if not normalized.schedule_mode:
+        missing.append("schedule_mode")
+    if normalized.schedule_mode == "times_per_week" and not normalized.times_per_week:
+        missing.append("times_per_week")
+    if normalized.schedule_mode in {"specific_days", "times_per_week"} and not normalized.schedule_days:
+        missing.append("schedule_days")
     return missing
 
 
@@ -811,6 +2011,8 @@ def _extract_intake_update_mock(latest_user_message: str, current_draft: AIIntak
         "goal_summary": _summarize_goal(message) if should_extract_goal else None,
         "habit_description": message if should_extract_goal and len(message.split()) > 5 else None,
         "frequency": _canonical_frequency(message),
+        "schedule_mode": _normalize_schedule_mode(message),
+        "times_per_week": _count_per_week_from_text(message),
         "schedule_text": _schedule_text_from_value(message),
         "schedule_days": _schedule_days_from_text(message),
         "duration_minutes": _duration_minutes_from_text(message),
@@ -847,6 +2049,8 @@ Return ONLY valid JSON with this shape:
   "goal_summary": "string or null",
   "habit_description": "string or null",
   "frequency": "string or null",
+  "schedule_mode": "daily|weekdays|weekends|specific_days|times_per_week|null",
+  "times_per_week": 3 or null,
   "schedule_text": "string or null",
   "schedule_days": ["monday"] or [],
   "duration_minutes": 20 or null,
@@ -860,6 +2064,8 @@ Rules:
 - If category is only weakly implied, leave category null or confidence low.
 - Experience level must map to beginner, intermediate, advanced, or null.
 - Frequency should stay as a plain-language phrase if present.
+- schedule_mode should be one of daily, weekdays, weekends, specific_days, times_per_week when the user clearly implied one.
+- times_per_week should only be set when the user clearly gave a weekly count.
 - schedule_days must only include concrete weekdays the user actually specified or strongly implied.
 - If the user only said a count like "3 times a week" without days, leave schedule_days empty.
 - duration_minutes should be an integer minute count when the user gave one.
@@ -904,16 +2110,24 @@ def _merged_draft(current_draft: AIIntakeDraft, extraction: dict, latest_user_me
 
     habit_description = _normalize_text(extracted.habit_description) or current_draft.habit_description
     frequency = _canonical_frequency(extracted.frequency) or current_draft.frequency
+    schedule_mode = _normalize_schedule_mode(extracted.schedule_mode) or current_draft.schedule_mode
+    times_per_week = _count_per_week_from_text(extracted.times_per_week) or current_draft.times_per_week
     schedule_days = _clean_schedule_days(extracted.schedule_days) or current_draft.schedule_days
     schedule_text = _schedule_text_from_value(extracted.schedule_text) or current_draft.schedule_text
+    if not schedule_mode:
+        schedule_mode = _normalize_schedule_mode(frequency) or _normalize_schedule_mode(schedule_text)
+    if not times_per_week:
+        times_per_week = _count_per_week_from_text(frequency) or _count_per_week_from_text(schedule_text)
     if not schedule_days and schedule_text:
         schedule_days = _schedule_days_from_text(schedule_text)
-    if not schedule_text and schedule_days:
-        schedule_text = _schedule_text_from_days(schedule_days)
     if not schedule_days and frequency:
         schedule_days = _schedule_days_from_text(frequency)
-    if not schedule_text and schedule_days:
-        schedule_text = _schedule_text_from_days(schedule_days)
+    if not schedule_days and schedule_mode in {"daily", "weekdays", "weekends"}:
+        schedule_days = _canonical_days_for_mode(schedule_mode)
+    if not schedule_mode and schedule_days:
+        schedule_mode = "specific_days"
+    if not schedule_text:
+        schedule_text = _derived_schedule_text(schedule_mode, times_per_week, schedule_days)
     duration_minutes = extracted.duration_minutes or current_draft.duration_minutes
     experience_level = _normalize_experience_level(extracted.experience_level) or current_draft.experience_level
 
@@ -931,6 +2145,8 @@ def _merged_draft(current_draft: AIIntakeDraft, extraction: dict, latest_user_me
             goal_summary=goal_summary,
             habit_description=habit_description,
             frequency=frequency,
+            schedule_mode=schedule_mode,
+            times_per_week=times_per_week,
             schedule_text=schedule_text,
             schedule_days=schedule_days,
             duration_minutes=duration_minutes,
@@ -948,9 +2164,11 @@ def _next_question(missing_fields: List[str]) -> str:
     field = missing_fields[0]
     if field == "goal_summary":
         return "Tell me the habit you want to build and a short description of what that habit looks like for you."
-    if field == "frequency":
-        return "How often do you want to do this habit?"
-    if field == "schedule":
+    if field == "schedule_mode":
+        return "What schedule fits best: every day, weekdays, weekends, specific days, or a certain number of times per week?"
+    if field == "times_per_week":
+        return "How many times per week do you want to do it?"
+    if field == "schedule_days":
         return "Which days of the week do you want to do it?"
     if field == "duration_minutes":
         return "How long should each session be?"
@@ -983,34 +2201,129 @@ def process_intake_step(
     current_draft: Optional[AIIntakeDraft],
     latest_user_message: str,
 ) -> IntakeStepResult:
+    # 1. Cap context window — never process more than MAX_RECENT_MESSAGES
+    capped_messages = list(recent_messages[-MAX_RECENT_MESSAGES:])
+
+    # 2. Classify intent of the latest message
+    intent = classify_intent(latest_user_message, capped_messages)
+
     base_draft = _validated_draft(current_draft or AIIntakeDraft())
-    extraction = _extract_intake_update(recent_messages=recent_messages, current_draft=base_draft, latest_user_message=latest_user_message)
+
+    # 3. Handle intents that bypass normal intake flow
+    if intent == "off_topic":
+        return IntakeStepResult(
+            assistant_message=(
+                "I’m here to help you build habits! Let’s get back on track. "
+                "What habit are you thinking of working on?"
+            ),
+            updated_draft=base_draft,
+            missing_fields=missing_fields_for_draft(base_draft),
+            conflict_fields=[],
+            ready_for_confirmation=False,
+            confirmation_summary=None,
+            needs_clarification=False,
+            needs_correction=False,
+            intent=intent,
+        )
+
+    if intent == "sensitive":
+        return IntakeStepResult(
+            assistant_message=(
+                "It sounds like you may be dealing with something that deserves proper support. "
+                "I’d recommend speaking with a doctor or therapist for personalized guidance. "
+                "I’m best suited for everyday habit-building — let me know if there’s a "
+                "different habit you’d like to explore."
+            ),
+            updated_draft=base_draft,
+            missing_fields=missing_fields_for_draft(base_draft),
+            conflict_fields=[],
+            ready_for_confirmation=False,
+            confirmation_summary=None,
+            needs_clarification=False,
+            needs_correction=False,
+            intent=intent,
+        )
+
+    if intent == "multi_habit":
+        return IntakeStepResult(
+            assistant_message=(
+                "It sounds like you have a few habits in mind — that’s great! "
+                "Let’s focus on one to start so we can build a solid plan. "
+                "Which one matters most to you right now?"
+            ),
+            updated_draft=base_draft,
+            missing_fields=missing_fields_for_draft(base_draft),
+            conflict_fields=[],
+            ready_for_confirmation=False,
+            confirmation_summary=None,
+            needs_clarification=False,
+            needs_correction=False,
+            intent=intent,
+        )
+
+    # 4. Normal intake flow
+    extraction = _extract_intake_update(
+        recent_messages=capped_messages,
+        current_draft=base_draft,
+        latest_user_message=latest_user_message,
+    )
     updated_draft = _merged_draft(base_draft, extraction=extraction, latest_user_message=latest_user_message)
 
+    # 5. Infer frequency/duration defaults from experience + category when fields are missing
+    updated_draft = _infer_defaults_from_experience(updated_draft)
+
+    # 6. Realism check
+    realism_result = check_realism(updated_draft)
+
+    conflict_fields, conflict_message = _first_conflict(updated_draft)
     missing_fields = missing_fields_for_draft(updated_draft)
-    ready_for_confirmation = not missing_fields
+    ready_for_confirmation = not missing_fields and not conflict_fields
     confirmation_summary = _confirmation_summary(updated_draft) if ready_for_confirmation else None
 
     required_field_changed = any(
         getattr(base_draft, field) != getattr(updated_draft, field)
-        for field in ["goal_summary", "frequency", "schedule_text", "schedule_days", "duration_minutes", "experience_level", "category"]
+        for field in [
+            "goal_summary",
+            "frequency",
+            "schedule_mode",
+            "times_per_week",
+            "schedule_text",
+            "schedule_days",
+            "duration_minutes",
+            "experience_level",
+            "category",
+        ]
     )
-    needs_clarification = bool(latest_user_message.strip()) and not required_field_changed and not ready_for_confirmation
+    needs_correction = bool(conflict_fields)
+    needs_clarification = bool(latest_user_message.strip()) and not required_field_changed and not ready_for_confirmation and not needs_correction
 
+    # 7. Build assistant message
     if ready_for_confirmation:
-        assistant_message = f"{confirmation_summary}\n\nIf that looks right, confirm and I’ll generate your plan."
+        base_message = f"{confirmation_summary}\n\nIf that looks right, confirm and I’ll generate your plan."
+    elif needs_correction and conflict_message:
+        base_message = conflict_message
     elif needs_clarification:
-        assistant_message = f"I still need one more detail. {_next_question(missing_fields)}"
+        base_message = f"I still need one more detail. {_next_question(missing_fields)}"
     else:
-        assistant_message = _next_question(missing_fields)
+        base_message = _next_question(missing_fields)
+
+    # Prepend realism warning when applicable
+    if not realism_result.is_realistic:
+        assistant_message = f"{realism_result.warning_message}\n\n{base_message}"
+    else:
+        assistant_message = base_message
 
     return IntakeStepResult(
         assistant_message=assistant_message,
         updated_draft=updated_draft,
         missing_fields=missing_fields,
+        conflict_fields=conflict_fields,
         ready_for_confirmation=ready_for_confirmation,
         confirmation_summary=confirmation_summary,
         needs_clarification=needs_clarification,
+        needs_correction=needs_correction,
+        intent=intent,
+        realism_warning=realism_result.warning_message if not realism_result.is_realistic else None,
     )
 
 
@@ -1031,7 +2344,17 @@ def revise_habit_plan(
     normalized_updated = _validated_draft(updated_intake.updated_draft)
     changed_required_fields = any(
         getattr(normalized_original, field) != getattr(normalized_updated, field)
-        for field in ["goal_summary", "frequency", "schedule_text", "schedule_days", "duration_minutes", "experience_level", "category"]
+        for field in [
+            "goal_summary",
+            "frequency",
+            "schedule_mode",
+            "times_per_week",
+            "schedule_text",
+            "schedule_days",
+            "duration_minutes",
+            "experience_level",
+            "category",
+        ]
     )
 
     if changed_required_fields:
