@@ -1,13 +1,9 @@
-"""AI pipeline tests — use AI_PROVIDER=mock to avoid OpenAI calls."""
+"""AI pipeline tests — AI_PROVIDER=mock is set in conftest.py before app loads."""
 from __future__ import annotations
 
-import os
 import pytest
 
 from tests.helpers import get_token, auth_headers, habit_payload
-
-# Force mock provider for all tests in this module
-os.environ.setdefault("AI_PROVIDER", "mock")
 
 
 ALL_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -53,7 +49,6 @@ def test_intake_requires_auth(client):
 
 
 def test_intake_returns_assistant_message(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     r = client.post(
         "/api/ai/intake",
@@ -79,7 +74,6 @@ def test_intake_missing_latest_message(client):
 
 
 def test_intake_with_goal(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     payload = {
         **INTAKE_REQUEST,
@@ -103,7 +97,6 @@ def test_generate_plan_requires_auth(client):
 
 
 def test_generate_plan_mock(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     r = client.post(
         "/api/ai/generate-plan",
@@ -119,7 +112,6 @@ def test_generate_plan_mock(client):
 
 
 def test_generate_plan_invalid_category(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     r = client.post(
         "/api/ai/generate-plan",
@@ -131,7 +123,6 @@ def test_generate_plan_invalid_category(client):
 
 
 def test_generate_plan_with_context(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     r = client.post(
         "/api/ai/generate-plan",
@@ -155,7 +146,6 @@ def test_generate_plan_with_context(client):
 # ---------------------------------------------------------------------------
 
 def test_generate_plan_from_draft(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     r = client.post(
         "/api/ai/generate-plan-from-draft",
@@ -178,7 +168,6 @@ def test_generate_plan_from_draft_requires_auth(client):
 # ---------------------------------------------------------------------------
 
 def test_generate_and_create(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     r = client.post(
         "/api/ai/generate-and-create",
@@ -193,7 +182,6 @@ def test_generate_and_create(client):
 
 
 def test_generate_and_create_habit_appears_in_list(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     client.post(
         "/api/ai/generate-and-create",
@@ -210,7 +198,6 @@ def test_generate_and_create_habit_appears_in_list(client):
 # ---------------------------------------------------------------------------
 
 def test_generate_and_create_from_draft(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     r = client.post(
         "/api/ai/generate-and-create-from-draft",
@@ -236,7 +223,6 @@ def test_generate_and_create_from_draft_requires_auth(client):
 # ---------------------------------------------------------------------------
 
 def test_revise_plan(client):
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
 
     # First generate a plan
@@ -286,7 +272,6 @@ def test_revise_plan_requires_auth(client):
 
 def test_ai_plan_has_valid_frequency_pattern(client):
     """Generated plan must always include a valid frequency_pattern."""
-    os.environ["AI_PROVIDER"] = "mock"
     token = get_token(client)
     r = client.post(
         "/api/ai/generate-plan",

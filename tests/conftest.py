@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+os.environ.setdefault("AI_PROVIDER", "mock")  # must be set before app.config is imported
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
