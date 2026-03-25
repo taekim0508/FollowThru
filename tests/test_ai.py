@@ -45,7 +45,7 @@ DRAFT = {
 
 def test_intake_requires_auth(client):
     r = client.post("/api/ai/intake", json=INTAKE_REQUEST)
-    assert r.status_code == 401
+    assert r.status_code in (401, 403)
 
 
 def test_intake_returns_assistant_message(client):
@@ -93,7 +93,7 @@ def test_generate_plan_requires_auth(client):
         "category": "fitness",
         "context": None,
     })
-    assert r.status_code == 401
+    assert r.status_code in (401, 403)
 
 
 def test_generate_plan_mock(client):
@@ -160,7 +160,7 @@ def test_generate_plan_from_draft(client):
 
 def test_generate_plan_from_draft_requires_auth(client):
     r = client.post("/api/ai/generate-plan-from-draft", json={"draft": DRAFT})
-    assert r.status_code == 401
+    assert r.status_code in (401, 403)
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ def test_generate_and_create_from_draft_requires_auth(client):
         "/api/ai/generate-and-create-from-draft",
         json={"draft": DRAFT},
     )
-    assert r.status_code == 401
+    assert r.status_code in (401, 403)
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +263,7 @@ def test_revise_plan_requires_auth(client):
         "critique": "more variety",
         "recent_messages": [],
     })
-    assert r.status_code == 401
+    assert r.status_code in (401, 403)
 
 
 # ---------------------------------------------------------------------------

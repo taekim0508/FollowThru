@@ -134,9 +134,9 @@ REALISM_CAPS: Dict[str, Dict[str, Dict[str, int]]] = {
         "advanced":     {"max_duration_minutes": 180, "max_days_per_week": 7},
     },
     "study": {
-        "beginner":     {"max_duration_minutes": 90,  "max_days_per_week": 7},
-        "intermediate": {"max_duration_minutes": 180, "max_days_per_week": 7},
-        "advanced":     {"max_duration_minutes": 240, "max_days_per_week": 7},
+        "beginner":     {"max_duration_minutes": 120, "max_days_per_week": 7},
+        "intermediate": {"max_duration_minutes": 240, "max_days_per_week": 7},
+        "advanced":     {"max_duration_minutes": 360, "max_days_per_week": 7},
     },
     "wellness": {
         "beginner":     {"max_duration_minutes": 60,  "max_days_per_week": 7},
@@ -640,7 +640,7 @@ def check_realism(draft: "AIIntakeDraft") -> RealistCheckResult:
     parts = [f"That's ambitious! {issue_text.capitalize()} can be a lot to start with as a {exp}."]
     suggestions: List[str] = []
     if suggested_duration:
-        suggestions.append(f"sessions up to {suggested_duration} minutes")
+        suggestions.append(f"sessions up to {_format_duration(suggested_duration)}")
     if suggested_days:
         suggestions.append(f"{suggested_days} days per week")
     if suggestions:
@@ -911,7 +911,7 @@ def _build_prompt(user_goal: str, category: str, context: Optional[dict]) -> str
         ambitious_section = f"""
 VARIANT: AMBITIOUS
 This is the ambitious version of the habit. The balanced version has:
-- Duration: {balanced_duration} minutes
+- Duration: {_format_duration(balanced_duration) if balanced_duration else "not set"}
 - Schedule: {bal_days_str}
 
 Your task: design a step-up that is noticeably more challenging but still realistic for
@@ -1072,7 +1072,7 @@ def _mock_plan_json(user_goal: str, category: str, context: Optional[dict]) -> d
 
     description = _description_for_category(category, habit_description)
     if requires_quantity:
-        description = f"{description} for about {duration_minutes} minutes"
+        description = f"{description} for about {_format_duration(duration_minutes)}"
     if critique and "more structured" in critique.lower():
         description = f"{description}. Keep the session clearly structured each time."
     if critique and "more variety" in critique.lower():
@@ -1488,7 +1488,22 @@ def _infer_preferred_time_from_text(text: str) -> str:
 
 
 def _inferred_experience_from_idea(idea: str) -> str:
-    return _normalize_experience_level(idea) or "beginner"
+    explicit = _normalize_experience_level(idea)
+    if explicit:
+        return explicit
+    lower = idea.lower()
+    # Academic / student signals — year in school implies existing study experience
+    if any(kw in lower for kw in [
+        "third year", "3rd year", "fourth year", "4th year",
+        "grad student", "graduate student", "postgrad", "phd", "masters",
+        "dissertation", "thesis", "law school", "med school",
+        "college senior", "university student", "years of studying",
+    ]):
+        return "intermediate"
+    # "Lock in", "grind", "serious" intent signals without procrastination history
+    if any(kw in lower for kw in ["lock in", "serious", "grind", "used to studying", "i study a lot"]):
+        return "intermediate"
+    return "beginner"
 
 
 def _default_duration_for_category(category: str) -> int:
@@ -1520,8 +1535,9 @@ def _proposal_variants(
     default_freq = EXPERIENCE_FREQUENCY_DEFAULTS[cat][exp]
     caps = REALISM_CAPS[cat][exp]
 
-    # Balanced: use experience defaults; honor user hint if within caps
-    bal_duration = duration_hint if (duration_hint and duration_hint <= caps["max_duration_minutes"]) else default_duration
+    # Balanced: honor explicitly stated duration even if it exceeds caps —
+    # the user knows what they want; caps only gate defaults, not explicit requests.
+    bal_duration = duration_hint if duration_hint else default_duration
     bal_freq = times_per_week_hint if (times_per_week_hint and times_per_week_hint <= caps["max_days_per_week"]) else default_freq
 
     # Ambitious: frequency = balanced + 1 session (capped at max); duration is chosen by GPT via few-shot prompt
@@ -1596,6 +1612,14 @@ def _habit_title_variant(base_title: str, label: str) -> str:
     if label == "ambitious":
         return f"{base_title} (Ambitious)"
     return base_title
+
+
+def _format_duration(minutes: int) -> str:
+    """Return a human-readable duration string: '45 min', '1h', '1h 30m', '3h'."""
+    if minutes < 60:
+        return f"{minutes} min"
+    hours, rem = divmod(minutes, 60)
+    return f"{hours}h" if rem == 0 else f"{hours}h {rem}m"
 
 
 def _schedule_summary_from_payload(habit_payload: HabitCreate) -> str:
@@ -1710,11 +1734,11 @@ def propose_habit_candidates(
     experience_level = _inferred_experience_from_idea(combined_idea)
     preferred_time = _infer_preferred_time_from_text(combined_idea)
 
-    # 4. Apply REALISM_CAPS — clamp user-stated hints to experience-level ceilings
+    # 4. Apply REALISM_CAPS — clamp schedule hints but NOT duration.
+    # Duration is intentionally left alone: the user explicitly stated it and we should honour it.
+    # caps still gate the default used when duration_hint is absent (handled in _proposal_variants).
     if experience_level in VALID_EXPERIENCE_LEVELS and category in REALISM_CAPS:
         caps = REALISM_CAPS[category][experience_level]
-        if duration_hint and duration_hint > caps["max_duration_minutes"]:
-            duration_hint = caps["max_duration_minutes"]
         if times_per_week_hint and times_per_week_hint > caps["max_days_per_week"]:
             times_per_week_hint = caps["max_days_per_week"]
         if schedule_days_hint and len(schedule_days_hint) > caps["max_days_per_week"]:
