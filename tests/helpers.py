@@ -33,7 +33,7 @@ def get_token(client, email="test@example.com", password="password123"):
 
 def habit_payload(
     name: str = "Morning Run",
-    category: str = "fitness",
+    category: str = "Fitness",
     description: str = "Go for a run",
     trigger_value: str = "07:00",
     days: list | None = None,
