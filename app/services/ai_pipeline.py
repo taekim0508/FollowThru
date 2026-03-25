@@ -28,6 +28,7 @@ VALID_DAYS = {
 VALID_CATEGORIES = {"fitness", "study", "wellness", "reading", "sleep"}
 VALID_EXPERIENCE_LEVELS = {"beginner", "intermediate", "advanced"}
 ORDERED_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+_ALL_DAYS_PATTERN: dict = {"days": list(ORDERED_DAYS)}
 NUMBER_WORDS = {
     "zero": 0,
     "one": 1,
@@ -240,7 +241,7 @@ def _canonical_frequency(value: Any) -> Optional[str]:
 def _frequency_from_text(text: str) -> tuple[str, Optional[dict]]:
     lowered = text.lower()
     if "every day" in lowered or "daily" in lowered or "each day" in lowered:
-        return "daily", None
+        return "daily", _ALL_DAYS_PATTERN
     if any(phrase in lowered for phrase in ["weekday", "weekdays", "monday to friday", "mon-fri", "except weekends"]):
         return "custom", {"days": ["monday", "tuesday", "wednesday", "thursday", "friday"]}
     if "weekend" in lowered:
@@ -263,9 +264,9 @@ def _frequency_from_text(text: str) -> tuple[str, Optional[dict]]:
             7: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
         }
         days = day_sets[count]
-        return ("daily", None) if len(days) == 7 else ("custom", {"days": days})
+        return ("daily", _ALL_DAYS_PATTERN) if len(days) == 7 else ("custom", {"days": days})
 
-    return "daily", None
+    return "daily", _ALL_DAYS_PATTERN
 
 
 def _clean_schedule_days(days: Any) -> List[str]:
@@ -498,7 +499,7 @@ def _mock_plan_json(user_goal: str, category: str, context: Optional[dict]) -> d
     frequency_type, frequency_pattern = _frequency_from_text(frequency_text)
     if schedule_days:
         frequency_type = "daily" if schedule_days == ORDERED_DAYS else "custom"
-        frequency_pattern = None if schedule_days == ORDERED_DAYS else {"days": schedule_days}
+        frequency_pattern = _ALL_DAYS_PATTERN if schedule_days == ORDERED_DAYS else {"days": schedule_days}
     experience_level = _normalize_experience_level(ctx.get("experience_level")) or "beginner"
     habit_description = _normalize_text(ctx.get("habit_description"))
     duration_minutes = _duration_minutes_from_text(ctx.get("duration_minutes")) or 15
@@ -619,7 +620,7 @@ def _normalize_llm_output(plan: HabitPlanLLMOutput, requested_category: str, use
         plan.frequency_pattern = inferred_pattern
 
     if plan.frequency_type == "daily":
-        plan.frequency_pattern = None
+        plan.frequency_pattern = _ALL_DAYS_PATTERN
     else:
         cleaned = _clean_days(plan.frequency_pattern)
         if not cleaned:
