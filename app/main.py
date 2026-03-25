@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import create_db_and_tables
-from .routes import habits, completions, friends, auth, debug, community
+from .routes import habits, completions, friends, auth, debug, community, analytics
 
 app = FastAPI(title="HabitFlow API", version="1.0.0")
 
@@ -13,6 +13,7 @@ app.include_router(auth.router)
 app.include_router(friends.router)
 app.include_router(community.router)
 app.include_router(debug.router)
+app.include_router(analytics.router)
 
 
 @app.on_event("startup")
