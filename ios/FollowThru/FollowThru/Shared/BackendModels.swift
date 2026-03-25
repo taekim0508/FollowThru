@@ -69,6 +69,11 @@ struct AIIntakeDraftDTO: Codable, Hashable {
     var category: String?          = nil  // free-form string; matches backend
     var preferredTime: AIPreferredTime = .flexible
     var availableTime: Int         = 15
+    // Passively inferred — never explicitly asked
+    var motivationStatement: String? = nil
+    var habitType: String          = "binary"   // "binary" | "tracked"
+    var targetValue: Double?       = nil
+    var quantityUnit: String?      = nil
 }
 
 struct AIIntakeRequestDTO: Codable, Hashable {

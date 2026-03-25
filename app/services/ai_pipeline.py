@@ -56,6 +56,40 @@ NUMBER_WORDS = {
     "sixty": 60,
 }
 
+_TRACKED_PATTERNS: List[tuple] = [
+    # (regex, target_group, unit)
+    (re.compile(r"(\d+(?:\.\d+)?)\s*km", re.I),       1, "km"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*miles?", re.I),   1, "miles"),
+    (re.compile(r"(\d+)\s*pages?", re.I),              1, "pages"),
+    (re.compile(r"(\d+)\s*glasses?", re.I),            1, "glasses"),
+    (re.compile(r"(\d+)\s*(?:cups?|liters?|litres?|oz)", re.I), 1, "glasses"),
+    (re.compile(r"(\d+)\s*reps?", re.I),               1, "reps"),
+    (re.compile(r"(\d+)\s*push\s*ups?", re.I),         1, "reps"),
+    (re.compile(r"(\d+)\s*sit\s*ups?", re.I),          1, "reps"),
+    (re.compile(r"(\d+)\s*calories?", re.I),           1, "calories"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*lbs?", re.I),     1, "lbs"),
+]
+
+_BINARY_KEYWORDS: frozenset = frozenset([
+    "meditate", "meditation", "journal", "journaling", "stretch", "stretching",
+    "pray", "prayer", "reflect", "reflection", "breathe", "breathing",
+    "cold shower", "no phone", "screen-free", "gratitude", "affirmation",
+    "sleep", "wake up", "wind down", "read", "reading",
+])
+
+
+def _infer_habit_type_from_text(text: str) -> tuple:
+    """Return (habit_type, target_value, quantity_unit) inferred from goal text."""
+    lowered = text.lower()
+    for pattern, group, unit in _TRACKED_PATTERNS:
+        m = pattern.search(lowered)
+        if m:
+            return "tracked", float(m.group(group)), unit
+    if any(kw in lowered for kw in _BINARY_KEYWORDS):
+        return "binary", None, None
+    return "binary", None, None
+
+
 _HABIT_KEYWORD_MAP: Dict[str, List[str]] = {
     "fitness": ["run", "running", "jog", "walk", "movement", "move more", "work out", "workout", "exercise", "gym", "lift", "yoga", "cycle", "swim", "swimming", "hike", "hiking"],
     "study": ["study", "learn", "practice coding", "homework", "exam", "class", "course", "read textbook", "flashcard"],
@@ -659,6 +693,20 @@ def _infer_defaults_from_experience(draft: "AIIntakeDraft") -> "AIIntakeDraft":
         schedule_text = _schedule_text_from_days(schedule_days)
         changed = True
 
+    # Infer habit_type from goal text when not already set
+    habit_type = draft.habit_type or "binary"
+    target_value = draft.target_value
+    quantity_unit = draft.quantity_unit
+    if not draft.target_value:
+        combined = " ".join(filter(None, [draft.goal_summary, draft.habit_description]))
+        if combined:
+            inferred_type, inferred_target, inferred_unit = _infer_habit_type_from_text(combined)
+            if inferred_type == "tracked":
+                habit_type = "tracked"
+                target_value = inferred_target
+                quantity_unit = inferred_unit
+                changed = True
+
     if not changed:
         return draft
 
@@ -673,6 +721,10 @@ def _infer_defaults_from_experience(draft: "AIIntakeDraft") -> "AIIntakeDraft":
         category=draft.category,
         preferred_time=draft.preferred_time,
         available_time=draft.available_time,
+        motivation_statement=draft.motivation_statement,
+        habit_type=habit_type,
+        target_value=target_value,
+        quantity_unit=quantity_unit,
     )
 
 
@@ -819,9 +871,19 @@ def _build_prompt(user_goal: str, category: str, context: Optional[dict]) -> str
     balanced_duration = ctx.get("balanced_duration")
     balanced_days = ctx.get("balanced_days")
 
+    habit_type = ctx.get("habit_type", "binary")
+    user_motivation = ctx.get("user_motivation")
+    target_value = ctx.get("target_value")
+    quantity_unit = ctx.get("quantity_unit")
+
     extra_sections = []
     if habit_description:
         extra_sections.append(f'Habit Description: "{habit_description}"')
+    if user_motivation:
+        extra_sections.append(f'User Motivation: "{user_motivation}"')
+    if habit_type == "tracked" and target_value is not None:
+        unit_label = quantity_unit or "units"
+        extra_sections.append(f"Habit Type: tracked — target {target_value} {unit_label} per session")
     if frequency:
         extra_sections.append(f'Desired Frequency: "{frequency}"')
     if schedule_mode:
@@ -1138,6 +1200,20 @@ def _normalize_llm_output(plan: HabitPlanLLMOutput, requested_category: str, use
     if not plan.motivation_statement:
         plan.motivation_statement = f"Consistent small steps make progress on: {user_goal}"
 
+    # Override with user-stated motivation if present in context
+    user_motivation = _normalize_context(context).get("user_motivation")
+    if user_motivation:
+        plan.motivation_statement = user_motivation
+
+    # Override habit_type / target / unit with user-stated values if present
+    ctx = _normalize_context(context)
+    if ctx.get("habit_type") == "tracked":
+        plan.requires_quantity = True
+        if ctx.get("target_value") is not None:
+            plan.target_value = ctx["target_value"]
+        if ctx.get("quantity_unit"):
+            plan.quantity_unit = ctx["quantity_unit"]
+
     return plan
 
 
@@ -1150,6 +1226,8 @@ def _to_habit_create(plan: HabitPlanLLMOutput) -> HabitCreate:
         trigger_value=plan.trigger_value,
         frequency_type=plan.frequency_type,
         frequency_pattern=plan.frequency_pattern,
+        habit_type="tracked" if plan.requires_quantity else "binary",
+        target_value=getattr(plan, "target_value", None),
         requires_quantity=plan.requires_quantity,
         quantity_unit=plan.quantity_unit,
         allows_notes=plan.allows_notes,
@@ -1893,7 +1971,13 @@ def _draft_context(draft: AIIntakeDraft, critique: Optional[str] = None, current
         "schedule_text": draft.schedule_text,
         "schedule_days": draft.schedule_days,
         "duration_minutes": draft.duration_minutes,
+        "habit_type": draft.habit_type or "binary",
     }
+    if draft.motivation_statement:
+        context["user_motivation"] = draft.motivation_statement
+    if draft.target_value is not None:
+        context["target_value"] = draft.target_value
+        context["quantity_unit"] = draft.quantity_unit
     if critique:
         context["critique"] = critique
     if current_plan:
@@ -2056,7 +2140,11 @@ Return ONLY valid JSON with this shape:
   "duration_minutes": 20 or null,
   "experience_level": "beginner|intermediate|advanced|null",
   "category": "fitness|study|wellness|reading|sleep|null",
-  "category_confidence": "low|medium|high"
+  "category_confidence": "low|medium|high",
+  "motivation_statement": "string or null",
+  "habit_type": "binary|tracked|null",
+  "target_value": 5.0 or null,
+  "quantity_unit": "km|pages|minutes|reps|glasses|null"
 }}
 
 Rules:
@@ -2069,6 +2157,9 @@ Rules:
 - schedule_days must only include concrete weekdays the user actually specified or strongly implied.
 - If the user only said a count like "3 times a week" without days, leave schedule_days empty.
 - duration_minutes should be an integer minute count when the user gave one.
+- motivation_statement: extract the user's stated reason or "why" if expressed (e.g. "to lose weight", "because I want to feel healthier"). Never fabricate — leave null if not stated.
+- habit_type: set "tracked" if the user mentioned a measurable target (e.g. "run 5km", "drink 8 glasses", "read 30 pages"); "binary" for checkbox habits (meditate, stretch, journal). Leave null if unclear.
+- target_value + quantity_unit: only set when habit_type is "tracked" and the user gave a concrete amount.
 """.strip()
 
     return _call_openai_messages_for_json(

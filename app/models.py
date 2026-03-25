@@ -250,6 +250,11 @@ class AIIntakeDraft(BaseModel):
     category: Optional[str] = None
     preferred_time: str = "flexible"
     available_time: int = 15
+    # Passively inferred — never explicitly asked
+    motivation_statement: Optional[str] = None   # extracted from user's "why"
+    habit_type: str = "binary"                   # "binary" | "tracked"
+    target_value: Optional[float] = None         # for tracked habits (e.g. 5.0 for "5km")
+    quantity_unit: Optional[str] = None          # for tracked habits (e.g. "km", "pages")
 
 
 class AIIntakeRequest(BaseModel):
