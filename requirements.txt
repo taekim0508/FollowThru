@@ -7,4 +7,5 @@ pydantic-settings
 python-jose[cryptography]
 email-validator
 python-dotenv
+openai
 httpx # for testing

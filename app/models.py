@@ -1,7 +1,7 @@
 from sqlmodel import SQLModel, Field, Relationship
 from datetime import datetime, date
-from typing import Optional, List
-from pydantic import BaseModel, EmailStr
+from typing import Optional, List, Literal
+from pydantic import BaseModel, EmailStr, Field as PydanticField
 from sqlalchemy import Column, JSON, UniqueConstraint, Index
 
 # ===== DATABASE MODELS (SQLModel - used for both DB and API responses) =====
@@ -230,6 +230,82 @@ class AIGenerateRequest(BaseModel):
     user_goal: str  # Natural language: "I want to pray except weekends"
     category: str  # fitness, study, wellness, reading, sleep
     context: Optional[dict] = None  # {"experience_level": "beginner", "available_time": 15}
+
+
+class AIChatMessage(BaseModel):
+    role: Literal["assistant", "user"]
+    content: str
+
+
+class AIIntakeDraft(BaseModel):
+    goal_summary: Optional[str] = None
+    habit_description: Optional[str] = None
+    frequency: Optional[str] = None
+    schedule_mode: Optional[str] = None
+    times_per_week: Optional[int] = None
+    schedule_text: Optional[str] = None
+    schedule_days: List[str] = PydanticField(default_factory=list)
+    duration_minutes: Optional[int] = None
+    experience_level: Optional[str] = None
+    category: Optional[str] = None
+    preferred_time: str = "flexible"
+    available_time: int = 15
+    # Passively inferred — never explicitly asked
+    motivation_statement: Optional[str] = None   # extracted from user's "why"
+    habit_type: str = "binary"                   # "binary" | "tracked"
+    target_value: Optional[float] = None         # for tracked habits (e.g. 5.0 for "5km")
+    quantity_unit: Optional[str] = None          # for tracked habits (e.g. "km", "pages")
+
+
+class AIIntakeRequest(BaseModel):
+    recent_messages: List[AIChatMessage] = []
+    current_draft: Optional[AIIntakeDraft] = None
+    latest_user_message: str
+
+
+class AIGenerateFromDraftRequest(BaseModel):
+    draft: AIIntakeDraft
+
+
+class AIPlanSnapshot(BaseModel):
+    habit_payload: HabitCreate
+    progressions: List[dict]
+
+
+class AIRevisePlanRequest(BaseModel):
+    draft: AIIntakeDraft
+    current_plan: AIPlanSnapshot
+    critique: str
+    recent_messages: List[AIChatMessage] = []
+
+
+class AIHabitCandidate(BaseModel):
+    title: str
+    category: str
+    description: str
+    suggested_schedule: str
+    duration_minutes: int
+    rationale: str
+    variant: str = "balanced"
+    habit_payload: HabitCreate
+    progressions: List[dict] = PydanticField(default_factory=list)
+
+
+class AIHabitProposalRequest(BaseModel):
+    recent_messages: List[AIChatMessage] = []
+    latest_user_message: str
+
+
+class AIRefineCandidateRequest(BaseModel):
+    idea: str
+    selected_candidate: AIHabitCandidate
+    refinement: str
+    recent_messages: List[AIChatMessage] = []
+
+
+class AICreateCandidateRequest(BaseModel):
+    candidate: AIHabitCandidate
+
 
 # ===== FRIENDS MODELS =====
 
