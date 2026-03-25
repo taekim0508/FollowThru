@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from .database import create_db_and_tables
+from .routes import habits, completions, friends, auth, debug, community, analytics
 from .database import create_db_and_tables, engine
 from .migrations import run_migrations
 from .routes import habits, completions, friends, auth, debug, community, ai
@@ -14,6 +16,7 @@ app.include_router(auth.router)
 app.include_router(friends.router)
 app.include_router(community.router)
 app.include_router(debug.router)
+app.include_router(analytics.router)
 app.include_router(ai.router)
 
 
