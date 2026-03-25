@@ -16,6 +16,8 @@ struct Habit: Identifiable, Codable, Hashable {
     var category: String
     // "active" | "paused" | "archived"
     var status: String
+    // optional motivation — why the user wants to build this habit
+    var motivationStatement: String?
 
     // MARK: Habit Type
     // "binary"  = checkbox, just did it or not
@@ -34,8 +36,8 @@ struct Habit: Identifiable, Codable, Hashable {
     // "time" = time-based trigger | "location" = geofence-based (future)
     var triggerType: String
 
-    // for time-based triggers: "HH:MM" format (e.g. "07:00")
-    var triggerValue: String
+    // null = no reminder set, "HH:MM" = time-based reminder
+    var triggerValue: String?
 
     // scheduled days — {"days": ["monday", "tuesday"...]}
     // always present. all 7 days = every day.

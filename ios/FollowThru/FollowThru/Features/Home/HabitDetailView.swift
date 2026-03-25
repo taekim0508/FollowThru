@@ -21,8 +21,23 @@ struct HabitDetailView: View {
     @State private var selectedDays: Set<String> = []
     @State private var showDayWarning = false
     @State private var triggerTime = Date()
+    @State private var useReminderTime = false
+    
+    // Category and Motivation Statement
+    @State private var selectedCategory = ""
+    @State private var motivationStatement = ""
 
-    private let presetUnits = ["minutes", "hours", "pages", "reps", "glasses", "km", "miles", "times"]
+    private let categories = [
+        "Fitness",
+        "Health & Wellness",
+        "Work",
+        "Social",
+        "Lifestyle",
+        "Finance",
+        "Creativity",
+        "Other"
+    ]
+    private let presetUnits = ["times", "miles", "minutes"]
     private let dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
     private let dayLabels = ["S", "M", "T", "W", "T", "F", "S"]
 
@@ -52,6 +67,8 @@ struct HabitDetailView: View {
 
                     nameSection
                     descriptionSection
+                    categorySection
+                    motivationSection
                     habitTypeSection
                     scheduleSection
                     timeSection
@@ -217,17 +234,29 @@ struct HabitDetailView: View {
     private var timeSection: some View {
         fieldSection("Reminder time") {
             if isEditing {
-                DatePicker(
-                    "Time",
-                    selection: $triggerTime,
-                    displayedComponents: .hourAndMinute
-                )
-                .datePickerStyle(.compact)
-                .labelsHidden()
+                Toggle("Set a reminder time", isOn: $useReminderTime)
+                    .tint(Theme.primary)
+
+                if useReminderTime {
+                    DatePicker(
+                        "Time",
+                        selection: $triggerTime,
+                        displayedComponents: .hourAndMinute
+                    )
+                    .datePickerStyle(.compact)
+                    .labelsHidden()
+                    .transition(.opacity)
+                }
             } else {
-                readOnly(habit.triggerValue)
+                // show "No reminder" if trigger_value is placeholder "00:00"
+                if let time = habit.triggerValue {
+                    readOnly(time)
+                } else {
+                    readOnly("No reminder")
+                }
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: useReminderTime)
     }
 
     private var deleteButton: some View {
@@ -244,6 +273,58 @@ struct HabitDetailView: View {
             .cornerRadius(12)
         }
         .padding(.top, 8)
+    }
+    
+    private var categorySection: some View {
+        fieldSection("Category") {
+            if isEditing {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 100), spacing: 8)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(categories, id: \.self) { category in
+                        let selected = selectedCategory == category
+                        Button {
+                            selectedCategory = category
+                        } label: {
+                            Text(category)
+                                .font(.subheadline).fontWeight(.medium)
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                                .background(selected ? Theme.primary : Theme.offWhite)
+                                .foregroundColor(selected ? Theme.white : Theme.textSecondary)
+                                .cornerRadius(20)
+                        }
+                    }
+                }
+            } else {
+                readOnly(habit.category)
+            }
+        }
+    }
+
+    private var motivationSection: some View {
+        fieldSection("Motivation") {
+            if isEditing {
+                TextField(
+                    "Why do you want to build this habit?",
+                    text: $motivationStatement,
+                    axis: .vertical
+                )
+                .lineLimit(3...5)
+                .padding(12)
+                .background(Theme.white)
+                .cornerRadius(10)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
+            } else {
+                if let motivation = habit.motivationStatement, !motivation.isEmpty {
+                    readOnly(motivation)
+                } else {
+                    readOnly("None")
+                }
+            }
+        }
     }
 
     // MARK: - Helpers
@@ -291,10 +372,12 @@ struct HabitDetailView: View {
         name = habit.name
         description = habit.description
         habitType = habit.habitType
+        selectedCategory = habit.category
+        motivationStatement = habit.motivationStatement ?? ""
         targetValueString = habit.targetValue.map { String(Int($0)) } ?? ""
         selectedDays = Set(habit.frequencyPattern.days)
-
-        // populate unit picker
+        
+        
         if let unit = habit.quantityUnit {
             if presetUnits.contains(unit) {
                 selectedPresetUnit = unit
@@ -304,12 +387,15 @@ struct HabitDetailView: View {
                 showCustomUnit = true
             }
         }
-
-        // parse trigger time string "HH:mm" → Date
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        if let t = formatter.date(from: habit.triggerValue) {
-            triggerTime = t
+        
+        // null trigger_value = no reminder
+        useReminderTime = habit.triggerValue != nil
+        if let tv = habit.triggerValue {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            if let t = formatter.date(from: tv) {
+                triggerTime = t
+            }
         }
     }
 
@@ -321,7 +407,11 @@ struct HabitDetailView: View {
     private func save() {
         let timeFormatter = DateFormatter()
         timeFormatter.dateFormat = "HH:mm"
-        let triggerValueString = timeFormatter.string(from: triggerTime)
+
+        // wrap trigger value — .null explicitly clears it, .value sets it
+        let triggerNullable: Nullable<String>? = useReminderTime
+            ? .value(timeFormatter.string(from: triggerTime))
+            : .null
 
         let targetValue = habitType == "tracked" ? Double(targetValueString) : nil
         let unit = habitType == "tracked" ? effectiveUnit : nil
@@ -332,11 +422,13 @@ struct HabitDetailView: View {
                 habit,
                 name: name,
                 description: description,
-                triggerValue: triggerValueString,
+                triggerValue: triggerNullable,
                 frequencyPattern: ["days": Array(selectedDays)],
                 habitType: habitType,
                 targetValue: targetValue,
-                quantityUnit: unit
+                quantityUnit: unit,
+                category: selectedCategory,
+                motivationStatement: motivationStatement.isEmpty ? nil : motivationStatement
             )
             isLoading = false
             withAnimation { isEditing = false }

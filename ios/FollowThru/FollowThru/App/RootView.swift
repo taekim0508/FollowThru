@@ -23,8 +23,12 @@ struct MainTabView: View {
             HomeView()
                 .tabItem { Label("Home", systemImage: "house") }
 
-            CalendarView()
-                .tabItem { Label("Calendar", systemImage: "calendar") }
+            // commented out bc may be obsolete with progress view
+            //CalendarView()
+                //.tabItem { Label("Calendar", systemImage: "calendar") }
+            
+            InsightsView()
+                .tabItem { Label("Insights", systemImage: "chart.xyaxis.line") }
 
             AIChatView()
                 .tabItem { Label("AI", systemImage: "sparkles") }
@@ -33,10 +37,7 @@ struct MainTabView: View {
             CommunityView()
                 .tabItem { Label("Community", systemImage: "person.2") }
             
-            // moved progress tab up one, so it is in the same supertab as profile ("... more")
-            ProgressShellView()
-                .tabItem { Label("Progress", systemImage: "chart.bar") }
-
+            
             ProfileView()
                 .tabItem { Label("Profile", systemImage: "person") }
         }

@@ -170,8 +170,9 @@ final class AppState: ObservableObject {
         habitType: String,
         targetValue: Double?,
         quantityUnit: String?,
-        triggerValue: String,
-        frequencyPattern: [String: [String]]
+        triggerValue: String?,  // changed to Optional
+        frequencyPattern: [String: [String]],
+        motivationStatement: String? = nil
     ) async {
         habitsError = nil
         do {
@@ -183,9 +184,9 @@ final class AppState: ObservableObject {
                 targetValue: targetValue,
                 quantityUnit: quantityUnit,
                 triggerValue: triggerValue,
-                frequencyPattern: frequencyPattern
+                frequencyPattern: frequencyPattern,
+                motivationStatement: motivationStatement
             )
-            // reload full list to get enriched response
             await loadHabits()
         } catch {
             habitsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -196,12 +197,14 @@ final class AppState: ObservableObject {
         _ habit: Habit,
         name: String? = nil,
         description: String? = nil,
-        triggerValue: String? = nil,
+        triggerValue: Nullable<String>? = nil,  // changed
         frequencyPattern: [String: [String]]? = nil,
         habitType: String? = nil,
         targetValue: Double? = nil,
         quantityUnit: String? = nil,
-        status: String? = nil
+        status: String? = nil,
+        category: String? = nil,
+        motivationStatement: String? = nil
     ) async {
         habitsError = nil
         do {
@@ -214,9 +217,10 @@ final class AppState: ObservableObject {
                 habitType: habitType,
                 targetValue: targetValue,
                 quantityUnit: quantityUnit,
-                status: status
+                status: status,
+                category: category,
+                motivationStatement: motivationStatement
             )
-            // reload full list to get enriched response
             await loadHabits()
         } catch {
             habitsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

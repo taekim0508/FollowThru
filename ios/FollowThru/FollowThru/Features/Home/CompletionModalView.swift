@@ -39,6 +39,15 @@ struct CompletionModalView: View {
                         .foregroundColor(Theme.textSecondary)
                         .multilineTextAlignment(.center)
                 }
+                // motivation — show below description if present
+                if let motivation = habit.motivationStatement, !motivation.isEmpty {
+                    Text("\(motivation)")
+                        .font(.caption)
+                        .foregroundColor(Theme.textSecondary)
+                        .italic()
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 2)
+                }
             }
 
             if habit.habitType == "binary" {
@@ -90,15 +99,24 @@ struct CompletionModalView: View {
     // MARK: - Binary UI
 
     private var binaryUI: some View {
-        AppButton(
-            habit.todayComplete ? "Already done ✓" : "Yes, I did it ✓",
-            variant: .primary
-        ) {
-            guard !habit.todayComplete else { return }
-            complete()
+        VStack(spacing: 12) {
+            AppButton(
+                habit.todayComplete ? "Already done ✓" : "Yes, I did it ✓",
+                variant: .primary
+            ) {
+                guard !habit.todayComplete else { return }
+                complete()
+            }
+            .disabled(habit.todayComplete || isLoading)
+            .opacity(habit.todayComplete ? 0.6 : 1)
+
+            // only show if not already completed
+            if !habit.todayComplete {
+                AppButton("No I didn't", variant: .secondary) {
+                    dismiss()
+                }
+            }
         }
-        .disabled(habit.todayComplete || isLoading)
-        .opacity(habit.todayComplete ? 0.6 : 1)
     }
 
     // MARK: - Tracked UI

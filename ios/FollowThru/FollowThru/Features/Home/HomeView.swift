@@ -171,7 +171,7 @@ struct HomeView: View {
 
                     HStack(spacing: 6) {
                         // habit type badge
-                        Text(habit.habitType == "binary" ? "Completion" : "Tracked")
+                        Text(habit.habitType == "binary" ? "Completion" : "Numeric")
                             .font(.caption)
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(Theme.sageLight)
@@ -193,6 +193,16 @@ struct HomeView: View {
                                 .foregroundColor(Theme.textSecondary)
                         }
                     }
+                    
+                    // motivation statement — only show if present
+                    if let motivation = habit.motivationStatement, !motivation.isEmpty {
+                        Text(motivation)
+                            .font(.caption)
+                            .foregroundColor(Theme.textSecondary)
+                            .italic()
+                            .fixedSize(horizontal: false, vertical: true)  // allows vertical growth
+                            .padding(.top, 2)
+                    }
                 }
 
                 Spacer()
@@ -205,12 +215,13 @@ struct HomeView: View {
                             .foregroundColor(Theme.sage)
                             .font(.system(size: 22))
                     } else if habit.habitType == "binary" {
-                        // incomplete binary button — show Done
+                        // binary button
                         AppButton("Done", variant: .compact, colorStyle: .action) {
                             appState.selectedHabit = habit
                         }
+                        .fixedSize()
                     } else {
-                        // tracked habit — show Log or Update
+                        // numeric button
                         AppButton(
                             habit.todayProgress != nil ? "Update" : "Log",
                             variant: .compact,
@@ -218,6 +229,7 @@ struct HomeView: View {
                         ) {
                             appState.selectedHabit = habit
                         }
+                        .fixedSize()
                     }
                 }
             }

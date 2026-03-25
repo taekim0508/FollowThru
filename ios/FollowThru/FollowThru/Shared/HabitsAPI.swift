@@ -8,6 +8,12 @@
 
 import Foundation
 
+/// Wraps a value to distinguish "not provided" (nil wrapper) from "explicitly set to null" (.some(nil))
+enum Nullable<T> {
+    case value(T)
+    case null
+}
+
 enum HabitsAPI {
 
     private static let session: URLSession = {
@@ -77,8 +83,9 @@ enum HabitsAPI {
         habitType: String,
         targetValue: Double?,
         quantityUnit: String?,
-        triggerValue: String,
-        frequencyPattern: [String: [String]]
+        triggerValue: String?,  // changed to Optional
+        frequencyPattern: [String: [String]],
+        motivationStatement: String? = nil
     ) async throws -> Habit {
         var body: [String: Any] = [
             "name": name,
@@ -86,11 +93,12 @@ enum HabitsAPI {
             "category": category,
             "habit_type": habitType,
             "trigger_type": "time",
-            "trigger_value": triggerValue,
             "frequency_pattern": frequencyPattern,
         ]
+        if let tv = triggerValue { body["trigger_value"] = tv }
         if let tv = targetValue { body["target_value"] = tv }
         if let qu = quantityUnit { body["quantity_unit"] = qu }
+        if let ms = motivationStatement, !ms.isEmpty { body["motivation_statement"] = ms }
 
         let req = try authorizedRequest("/api/habits/", method: "POST", body: body)
         let (data, response) = try await session.data(for: req)
@@ -104,22 +112,32 @@ enum HabitsAPI {
         id: Int,
         name: String? = nil,
         description: String? = nil,
-        triggerValue: String? = nil,
+        triggerValue: Nullable<String>? = nil,  // changed
         frequencyPattern: [String: [String]]? = nil,
         habitType: String? = nil,
         targetValue: Double? = nil,
         quantityUnit: String? = nil,
-        status: String? = nil
+        status: String? = nil,
+        category: String? = nil,
+        motivationStatement: String? = nil
     ) async throws -> Habit {
         var body: [String: Any] = [:]
         if let v = name { body["name"] = v }
         if let v = description { body["description"] = v }
-        if let v = triggerValue { body["trigger_value"] = v }
+        // handle nullable trigger_value explicitly
+        if let tv = triggerValue {
+            switch tv {
+            case .value(let s): body["trigger_value"] = s
+            case .null: body["trigger_value"] = NSNull()
+            }
+        }
         if let v = frequencyPattern { body["frequency_pattern"] = v }
         if let v = habitType { body["habit_type"] = v }
         if let v = targetValue { body["target_value"] = v }
         if let v = quantityUnit { body["quantity_unit"] = v }
         if let v = status { body["status"] = v }
+        if let v = category { body["category"] = v }
+        if let v = motivationStatement { body["motivation_statement"] = v }
 
         let req = try authorizedRequest("/api/habits/\(id)", method: "PUT", body: body)
         let (data, response) = try await session.data(for: req)

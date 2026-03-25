@@ -9,6 +9,16 @@ from ..services.utils import is_scheduled_day, next_scheduled_day_after
 
 router = APIRouter(prefix="/api/habits", tags=["habits"])
 
+VALID_CATEGORIES = {
+    "Fitness",
+    "Health & Wellness",
+    "Work",
+    "Social",
+    "Lifestyle",
+    "Finance",
+    "Creativity",
+    "Other",
+}
 
 def _check_and_reset_streaks(session: Session, user_id: int) -> None:
     """
@@ -83,6 +93,7 @@ def _build_habit_response(session: Session, habit: Habit, today: date) -> dict:
         "category": habit.category,
         "description": habit.description,
         "status": habit.status,
+        "motivation_statement": habit.motivation_statement,
 
         # habit type and tracking
         "habit_type": habit.habit_type,
@@ -116,12 +127,17 @@ def create_habit(
         session: Session = Depends(get_session),
         user: User = Depends(current_user),
 ):
-    """Create a new habit"""
+    """Create a new habit."""
+    if habit.category not in VALID_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {', '.join(sorted(VALID_CATEGORIES))}"
+        )
+
     db_habit = Habit(**habit.model_dump(), user_id=user.id, started_at=date.today())
     session.add(db_habit)
     session.commit()
     session.refresh(db_habit)
-    # return full enriched response instead of raw SQLModel object
     return _build_habit_response(session, db_habit, date.today())
 
 
@@ -142,6 +158,13 @@ def update_habit(
         raise HTTPException(
             status_code=400,
             detail="Habit type cannot be changed after creation"
+        )
+
+    # validate category if provided
+    if habit_update.category is not None and habit_update.category not in VALID_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {', '.join(sorted(VALID_CATEGORIES))}"
         )
 
     update_data = habit_update.model_dump(exclude_unset=True)

@@ -19,17 +19,33 @@ struct CreateHabitView: View {
     // scheduling
     @State private var selectedDays: Set<String> = []
     @State private var showDayWarning = false
+    @State private var useReminderTime = false
 
     // trigger time
     @State private var triggerTime = Date()
+    
+    // Categories and Motivation Statement
+    @State private var selectedCategory = ""
+    @State private var motivationStatement = ""
 
     // preset unit options
-    private let presetUnits = ["minutes", "hours", "pages", "reps", "glasses", "km", "miles", "times"]
+    private let presetUnits = ["times", "miles", "minutes"]
     private let dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
     private let dayLabels = ["S", "M", "T", "W", "T", "F", "S"]
+    private let categories = [
+        "Fitness",
+        "Health & Wellness",
+        "Work",
+        "Social",
+        "Lifestyle",
+        "Finance",
+        "Creativity",
+        "Other"
+    ]
 
     private var canSave: Bool {
         guard !name.isEmpty else { return false }
+        guard !selectedCategory.isEmpty else { return false }
         guard !selectedDays.isEmpty else { return false }
         if habitType == "tracked" {
             guard !targetValueString.isEmpty else { return false }
@@ -69,7 +85,7 @@ struct CreateHabitView: View {
                     // Habit Type
                     fieldSection("How will you track it?") {
                         Picker("Habit Type", selection: $habitType) {
-                            Text("Completion").tag("binary")
+                            Text("Completion-Based").tag("binary")
                             Text("Numeric Goal").tag("tracked")
                         }
                         .pickerStyle(.segmented)
@@ -118,7 +134,7 @@ struct CreateHabitView: View {
                                         Button {
                                             showCustomUnit = true
                                         } label: {
-                                            Text("custom")
+                                            Text("CUSTOM")
                                                 .font(.caption).fontWeight(.semibold)
                                                 .padding(.horizontal, 12).padding(.vertical, 6)
                                                 .background(showCustomUnit ? Theme.primary : Theme.offWhite)
@@ -141,6 +157,45 @@ struct CreateHabitView: View {
                         }
                     }
                     .animation(.easeInOut(duration: 0.2), value: habitType)
+                    
+                    // Category — required
+                    fieldSection("Category") {
+                        // wrapping layout using FlowLayout-style with LazyVGrid
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 100), spacing: 8)],
+                            alignment: .leading,
+                            spacing: 8
+                        ) {
+                            ForEach(categories, id: \.self) { category in
+                                let selected = selectedCategory == category
+                                Button {
+                                    selectedCategory = category
+                                } label: {
+                                    Text(category)
+                                        .font(.subheadline).fontWeight(.medium)
+                                        .padding(.horizontal, 12).padding(.vertical, 8)
+                                        .frame(maxWidth: .infinity)
+                                        .background(selected ? Theme.primary : Theme.offWhite)
+                                        .foregroundColor(selected ? Theme.white : Theme.textSecondary)
+                                        .cornerRadius(20)
+                                }
+                            }
+                        }
+                    }
+
+                    // Motivation Statement — optional
+                    fieldSection("Motivation (optional)") {
+                        TextField(
+                            "Why do you want to build this habit?",
+                            text: $motivationStatement,
+                            axis: .vertical
+                        )
+                        .lineLimit(3...5)
+                        .padding(12)
+                        .background(Theme.white)
+                        .cornerRadius(10)
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
+                    }
 
                     // Schedule
                     fieldSection("Repeat on") {
@@ -171,14 +226,21 @@ struct CreateHabitView: View {
 
                     // Trigger time
                     fieldSection("Reminder time") {
-                        DatePicker(
-                            "Time",
-                            selection: $triggerTime,
-                            displayedComponents: .hourAndMinute
-                        )
-                        .datePickerStyle(.compact)
-                        .labelsHidden()
+                        Toggle("Set a reminder time", isOn: $useReminderTime)
+                            .tint(Theme.primary)
+
+                        if useReminderTime {
+                            DatePicker(
+                                "Time",
+                                selection: $triggerTime,
+                                displayedComponents: .hourAndMinute
+                            )
+                            .datePickerStyle(.compact)
+                            .labelsHidden()
+                            .transition(.opacity)
+                        }
                     }
+                    .animation(.easeInOut(duration: 0.2), value: useReminderTime)
                 }
                 .padding()
             }
@@ -229,10 +291,9 @@ struct CreateHabitView: View {
     private func save() {
         let timeFormatter = DateFormatter()
         timeFormatter.dateFormat = "HH:mm"
-        let triggerValueString = timeFormatter.string(from: triggerTime)
-
+        // use "00:00" as placeholder when no reminder time set
+        let triggerValueString: String? = useReminderTime ? timeFormatter.string(from: triggerTime) : nil
         let frequencyPattern = ["days": Array(selectedDays)]
-
         let targetValue = habitType == "tracked" ? Double(targetValueString) : nil
         let unit = habitType == "tracked" ? effectiveUnit : nil
 
@@ -240,12 +301,13 @@ struct CreateHabitView: View {
             await appState.createHabit(
                 name: name,
                 description: description,
-                category: "general",
+                category: selectedCategory,
                 habitType: habitType,
                 targetValue: targetValue,
                 quantityUnit: unit,
                 triggerValue: triggerValueString,
-                frequencyPattern: frequencyPattern
+                frequencyPattern: frequencyPattern,
+                motivationStatement: motivationStatement.isEmpty ? nil : motivationStatement
             )
             dismiss()
         }

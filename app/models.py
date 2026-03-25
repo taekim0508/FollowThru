@@ -70,7 +70,8 @@ class Habit(SQLModel, table=True):
     description: str
 
     trigger_type: str = Field(max_length=20, default="time")
-    trigger_value: str = Field(max_length=10)
+    # null = no reminder set, "HH:MM" = reminder time
+    trigger_value: Optional[str] = Field(default=None, max_length=10)
 
     frequency_type: str = Field(max_length=20)
     frequency_pattern: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
@@ -163,7 +164,8 @@ class HabitCreate(BaseModel):
     # trigger_type: what initiates the habit reminder ("time" = time-based, "location" = geofence-based)
     # trigger_value: the actual trigger value — for time-based habits this is "HH:MM" (e.g. "07:00")
     trigger_type: str = "time"
-    trigger_value: str
+    # null = no reminder, "HH:MM" = reminder time (e.g. "07:00")
+    trigger_value: Optional[str] = None
 
     # deprecated — kept for backwards compatibility with existing API callers, not used in logic
     frequency_type: str = Field(default="custom", max_length=20)
@@ -211,6 +213,9 @@ class HabitUpdate(BaseModel):
     # deprecated — kept for API compatibility
     requires_quantity: Optional[bool] = None
 
+    # allow update of motivation statement and category
+    motivation_statement: Optional[str] = None
+    category: Optional[str] = None
     status: Optional[str] = None
 
 

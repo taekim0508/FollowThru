@@ -1,11 +1,18 @@
+//
+//  InsightsView.swift
+//  FollowThru
+//
+//  Created by Ronnie Yalung on 3/25/26.
+//
+
 import SwiftUI
 
-struct ProgressShellView: View {
+struct InsightsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 14) {
                 Spacer()
-                Image(systemName: "chart.bar.xaxis")
+                Image(systemName: "chart.xyaxis.line")
                     .font(.system(size: 52))
                     .foregroundColor(Theme.softBlue)
                 Text("Progress")
