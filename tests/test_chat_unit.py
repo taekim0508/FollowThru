@@ -7,6 +7,7 @@ from app.models import AIIntakeDraft
 from app.services.ai_pipeline import (
     _CONFIDENCE_THRESHOLD,
     _compute_confidence,
+    _coerce_schedule_days,
     _is_clearly_offtopic,
     _merge_extracted,
     _parse_candidates,
@@ -289,3 +290,66 @@ class TestParseCandidates:
         results = _parse_candidates(raw)
         assert results[0].habit_payload.name == "Deep Work"
         assert results[0].habit_payload.category == "study"
+
+
+# ---------------------------------------------------------------------------
+# _coerce_schedule_days — the bug that caused the 500
+# ---------------------------------------------------------------------------
+
+class TestCoerceScheduleDays:
+    def test_string_range_monday_through_saturday(self):
+        result = _coerce_schedule_days("Monday through Saturday")
+        assert result == ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+
+    def test_string_range_monday_to_friday(self):
+        result = _coerce_schedule_days("Monday to Friday")
+        assert result == ["monday", "tuesday", "wednesday", "thursday", "friday"]
+
+    def test_comma_separated_string(self):
+        result = _coerce_schedule_days("Mon, Wed, Fri")
+        assert result == ["monday", "wednesday", "friday"]
+
+    def test_slash_separated_string(self):
+        result = _coerce_schedule_days("Mon/Wed/Fri")
+        assert result == ["monday", "wednesday", "friday"]
+
+    def test_list_of_capitalized_names(self):
+        result = _coerce_schedule_days(["Monday", "Wednesday", "Friday"])
+        assert result == ["monday", "wednesday", "friday"]
+
+    def test_list_already_lowercase(self):
+        result = _coerce_schedule_days(["monday", "thursday"])
+        assert result == ["monday", "thursday"]
+
+    def test_weekdays_shorthand(self):
+        result = _coerce_schedule_days("weekdays")
+        assert result == ["monday", "tuesday", "wednesday", "thursday", "friday"]
+
+    def test_weekend_shorthand(self):
+        result = _coerce_schedule_days("weekends")
+        assert result == ["saturday", "sunday"]
+
+    def test_daily_shorthand(self):
+        result = _coerce_schedule_days("daily")
+        assert len(result) == 7
+
+    def test_invalid_string_returns_empty(self):
+        result = _coerce_schedule_days("sometime next week")
+        assert result == []
+
+    def test_invalid_type_returns_empty(self):
+        assert _coerce_schedule_days(42) == []
+
+    def test_merge_extracted_with_string_schedule_days(self):
+        """Regression: the exact input that caused the 500."""
+        draft = AIIntakeDraft()
+        result = _merge_extracted(draft, {"schedule_days": "Monday through Saturday"})
+        assert result.schedule_days == [
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"
+        ]
+
+    def test_merge_extracted_invalid_schedule_days_ignored(self):
+        """If coercion yields nothing, the existing draft value is preserved."""
+        draft = AIIntakeDraft(schedule_days=["monday"])
+        result = _merge_extracted(draft, {"schedule_days": "some nonsense"})
+        assert result.schedule_days == ["monday"]

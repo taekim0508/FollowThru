@@ -2679,6 +2679,69 @@ def _tier2_call(draft: AIIntakeDraft, model: str) -> dict:
     return _call_openai_messages_for_json(messages, model)
 
 
+_DAY_ALIASES: Dict[str, str] = {
+    "mon": "monday", "tue": "tuesday", "tues": "tuesday",
+    "wed": "wednesday", "thu": "thursday", "thur": "thursday", "thurs": "thursday",
+    "fri": "friday", "sat": "saturday", "sun": "sunday",
+}
+
+
+def _coerce_schedule_days(value: object) -> List[str]:
+    """Normalize schedule_days to a list of lowercase day names regardless of AI format.
+
+    Handles:
+      - Already a list: ["Monday", "Wednesday"] → ["monday", "wednesday"]
+      - Comma/slash separated string: "Mon, Wed, Fri" → ["monday", "wednesday", "friday"]
+      - Range string: "Monday through Saturday" → ["monday"..."saturday"]
+      - Plain prose: "weekdays" → ["monday","tuesday","wednesday","thursday","friday"]
+    """
+    if isinstance(value, list):
+        result = []
+        for item in value:
+            day = str(item).strip().lower()
+            day = _DAY_ALIASES.get(day, day)
+            if day in VALID_DAYS:
+                result.append(day)
+        return result
+
+    if not isinstance(value, str):
+        return []
+
+    lower = value.strip().lower()
+
+    # Shorthand expansions
+    if lower in ("weekdays", "weekday", "mon-fri", "mon–fri"):
+        return ["monday", "tuesday", "wednesday", "thursday", "friday"]
+    if lower in ("weekends", "weekend", "sat-sun", "sat/sun"):
+        return ["saturday", "sunday"]
+    if lower in ("daily", "every day", "all week", "all days"):
+        return list(ORDERED_DAYS)
+
+    # "X through Y" / "X to Y" range
+    for sep in (" through ", " to ", "-", "–"):
+        if sep in lower:
+            parts = lower.split(sep, 1)
+            start = parts[0].strip()
+            end = parts[1].strip()
+            start = _DAY_ALIASES.get(start, start)
+            end = _DAY_ALIASES.get(end, end)
+            if start in ORDERED_DAYS and end in ORDERED_DAYS:
+                si, ei = ORDERED_DAYS.index(start), ORDERED_DAYS.index(end)
+                if si <= ei:
+                    return ORDERED_DAYS[si: ei + 1]
+
+    # Comma / slash / space separated list
+    import re as _re
+    tokens = _re.split(r"[,/\s]+", lower)
+    result = []
+    for token in tokens:
+        token = token.strip().rstrip(".")
+        token = _DAY_ALIASES.get(token, token)
+        if token in VALID_DAYS:
+            result.append(token)
+    return result
+
+
 def _merge_extracted(draft: AIIntakeDraft, extracted: dict) -> AIIntakeDraft:
     """Merge fields extracted by Tier 1 into the current draft."""
     data = draft.model_dump()
@@ -2689,7 +2752,13 @@ def _merge_extracted(draft: AIIntakeDraft, extracted: dict) -> AIIntakeDraft:
         "habit_type", "target_value", "quantity_unit",
     }
     for key, val in extracted.items():
-        if key in allowed and val is not None:
+        if key not in allowed or val is None:
+            continue
+        if key == "schedule_days":
+            coerced = _coerce_schedule_days(val)
+            if coerced:  # only update if we got something valid
+                data[key] = coerced
+        else:
             data[key] = val
     return AIIntakeDraft(**data)
 
