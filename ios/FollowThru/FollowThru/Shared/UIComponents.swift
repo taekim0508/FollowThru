@@ -57,7 +57,7 @@ struct AppButton: View {
                 .font(.subheadline).fontWeight(.semibold)
                 .foregroundColor(fg)
                 .padding(.horizontal, 14)
-                .frame(minWidth: 120)
+                .frame(minWidth: 80)
                 .frame(height: 36)
                 .background(bg)
                 .cornerRadius(10)

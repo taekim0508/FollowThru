@@ -1,47 +1,47 @@
 import SwiftUI
+import Combine
 
 struct AIChatView: View {
     @EnvironmentObject var appState: AppState
 
     @State private var messages: [AIConversationMessage] = [AIChatView.introMessage]
-    @State private var draft = AIIntakeDraftDTO()
-    @State private var phase: AIConversationPhase = .intake
+    @State private var entries: [AIChatLogItem] = [.message(AIChatView.introMessage)]
     @State private var input = ""
-    @State private var preview: AIPlanPreview? = nil
-    @State private var previewBeforeRevision: AIPlanPreview? = nil
-    @State private var confirmationSummary: String? = nil
-    @State private var createdHabitName: String? = nil
-    @State private var errorMessage: String? = nil
-    @State private var pendingAction: PendingAction? = nil
-
-    private enum PendingAction {
-        case intake, generating, revising, creating
-    }
+    @State private var ideaContext = ""
+    @State private var busyState: AIChatBusyState? = nil
 
     private static let introMessage = AIConversationMessage(
         role: .assistant,
-        text: "What's a habit you've been meaning to make stick? Tell me whatever's on your mind — I'll shape it into a plan."
+        text: "I'm your FollowThru habit coach. Tell me what kind of change you want in your life, what you're struggling with, and anything that would make the habit realistic or unrealistic for you."
     )
 
-    private var isBusy: Bool { pendingAction != nil }
+    private var isBusy: Bool { busyState != nil }
+
+    private var hasSuccessEntry: Bool {
+        entries.contains { entry in
+            if case .success = entry.content {
+                return true
+            }
+            return false
+        }
+    }
+
+    private var activeProposalEntryID: UUID? {
+        entries.last(where: { entry in
+            guard case .proposals(let block) = entry.content else { return false }
+            return block.state == .active
+        })?.id
+    }
 
     private var showsComposer: Bool {
-        switch phase {
-        case .intake, .confirming, .revising: return true
-        case .preview, .created:              return false
-        }
+        !isBusy && !hasSuccessEntry
     }
 
     private var composerPlaceholder: String {
-        switch phase {
-        case .intake:            return "Describe the habit you want to build..."
-        case .confirming:        return "Confirm, or tell me what to change..."
-        case .revising:          return "What would you like to tweak?"
-        case .preview, .created: return ""
-        }
+        activeProposalEntryID != nil
+            ? "Ask to adjust, change schedule, swap a day..."
+            : "Tell me what kind of change you want to make..."
     }
-
-    // MARK: – Body
 
     var body: some View {
         NavigationStack {
@@ -49,72 +49,49 @@ struct AIChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 14) {
-                            ForEach(messages) { message in
-                                bubble(message)
+                            ForEach(entries) { entry in
+                                entryView(entry)
+                                    .id(entry.id)
                             }
 
-                            if let errorMessage {
-                                errorCard(errorMessage)
-                            }
-
-                            if let confirmationSummary, phase == .confirming {
-                                confirmationCard(summary: confirmationSummary)
-                            }
-
-                            if pendingAction == .generating {
-                                loadingCard(title: "Building Your Plan",
-                                            message: "Turning your inputs into a realistic starter plan.")
-                            }
-                            if pendingAction == .creating {
-                                loadingCard(title: "Creating Habit",
-                                            message: "Saving your plan to your habits list.")
-                            }
-                            if pendingAction == .revising {
-                                loadingCard(title: "Revising Plan",
-                                            message: "Updating the plan based on your feedback.")
-                            }
-
-                            if let preview, phase == .preview {
-                                previewCard(preview)
-                            }
-
-                            if let createdHabitName, phase == .created {
-                                successCard(createdHabitName: createdHabitName)
-                            }
-
-                            Color.clear.frame(height: 1).id("bottom")
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottom")
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                     }
-                    .onChange(of: messages.count, initial: false) { _, _ in
-                        withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                    .onChange(of: entries.count, initial: false) { _, _ in
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
                     }
-                    .onChange(of: phase, initial: false) { _, _ in
-                        withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                    .onAppear {
+                        proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
 
-                if showsComposer { composerBar }
+                if showsComposer {
+                    composerBar
+                }
             }
             .background(Theme.background.ignoresSafeArea())
-            .navigationTitle("AI Coach")
+            .navigationTitle("Habit Coach")
             .navigationBarTitleDisplayMode(.inline)
         }
     }
-
-    // MARK: – Composer bar
 
     private var composerBar: some View {
         VStack(spacing: 0) {
             Divider().background(Theme.border)
             HStack(alignment: .bottom, spacing: 10) {
                 ZStack(alignment: .leading) {
-                    if input.isEmpty, !composerPlaceholder.isEmpty {
+                    if input.isEmpty {
                         AnimatedComposerPlaceholder(text: composerPlaceholder)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 12)
                     }
+
                     TextField("", text: $input, axis: .vertical)
                         .lineLimit(1...4)
                         .padding(.horizontal, 14)
@@ -122,7 +99,10 @@ struct AIChatView: View {
                 }
                 .background(Theme.white)
                 .cornerRadius(14)
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border, lineWidth: 1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
 
                 Button(action: sendMessage) {
                     Image(systemName: isBusy ? "hourglass" : "arrow.up.circle.fill")
@@ -141,166 +121,186 @@ struct AIChatView: View {
         !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
     }
 
-    // MARK: – Message routing
-
     private func sendMessage() {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isBusy else { return }
-        let priorMessages = messages
-        messages.append(AIConversationMessage(role: .user, text: trimmed))
-        input = ""
-        errorMessage = nil
 
-        switch phase {
-        case .intake:
-            handleIntakeTurn(userMessage: trimmed, priorMessages: priorMessages)
-        case .confirming:
-            if isAffirmative(trimmed) {
-                generatePlanFromDraft()
-            } else {
-                handleIntakeTurn(userMessage: trimmed, priorMessages: priorMessages)
-            }
-        case .revising:
-            revisePlan(critique: trimmed, priorMessages: priorMessages)
-        case .preview, .created:
-            break
+        // If there's an active proposal, route to refineCandidate on the most recent active candidate
+        if let activeEntryID = activeProposalEntryID,
+           let activeEntry = entries.first(where: { $0.id == activeEntryID }),
+           case .proposals(let block) = activeEntry.content,
+           let mostRecentCandidate = block.candidates.first {
+            input = ""
+            refineCandidate(mostRecentCandidate, instruction: trimmed, userFacingText: trimmed)
+            return
         }
-    }
 
-    // MARK: – Async actions
+        let priorMessages = messages
+        appendConversationMessage(.init(role: .user, text: trimmed))
+        if ideaContext.isEmpty {
+            ideaContext = trimmed
+        } else {
+            ideaContext += "\n\(trimmed)"
+        }
+        input = ""
 
-    private func handleIntakeTurn(userMessage: String, priorMessages: [AIConversationMessage]) {
-        pendingAction = .intake
+        let loadingID = appendLoading(.proposing)
+        busyState = .proposing
+
         Task {
-            let response = await appState.submitAIIntake(
+            let response = await appState.requestAIHabitProposals(
                 recentMessages: priorMessages,
-                currentDraft: draft,
-                latestUserMessage: userMessage
+                latestUserMessage: trimmed
             )
-            pendingAction = nil
+            busyState = nil
+            removeEntry(id: loadingID)
+
             guard let response else {
-                errorMessage = appState.aiError ?? "Something went wrong. Please try again."
+                appendError(appState.aiError ?? "I couldn't shape that into habits yet. Please try again.")
                 return
             }
-            draft = response.updatedDraft
-            confirmationSummary = response.confirmationSummary
-            messages.append(AIConversationMessage(role: .assistant, text: response.assistantMessage))
-            phase = response.readyForConfirmation ? .confirming : .intake
-        }
-    }
 
-    private func generatePlanFromDraft() {
-        guard !isBusy else { return }
-        pendingAction = .generating
-        errorMessage = nil
-        preview = nil
-        createdHabitName = nil
-        Task {
-            let generatedPreview = await appState.requestAIPlan(from: draft)
-            pendingAction = nil
-            if let generatedPreview {
-                preview = generatedPreview
-                phase = .preview
-                messages.append(AIConversationMessage(role: .assistant, text: "Your plan is ready. Take a look below."))
-            } else {
-                errorMessage = appState.aiError ?? "Plan generation failed. Please try again."
+            appendConversationMessage(.init(role: .assistant, text: response.assistantMessage))
+
+            if !response.candidates.isEmpty && !response.needsClarification {
+                entries.append(
+                    .proposalBlock(
+                        whatIHeard: response.whatIHeard,
+                        candidates: response.candidates,
+                        state: .active
+                    )
+                )
             }
         }
     }
 
-    private func createHabit() {
+    private func createHabit(from candidate: AIHabitCandidateDTO, sourceEntryID: UUID) {
         guard !isBusy else { return }
-        pendingAction = .creating
-        errorMessage = nil
+
+        setProposalState(.accepted, for: sourceEntryID)
+        appendConversationMessage(.init(role: .user, text: "Use This Habit: \(candidate.title)"))
+
+        let loadingID = appendLoading(.creating)
+        busyState = .creating
+
         Task {
-            let createdHabit = await appState.createHabitFromAI(draft: draft)
-            pendingAction = nil
-            if let createdHabit {
-                preview = appState.latestAIPlan ?? preview
-                createdHabitName = createdHabit.name
-                phase = .created
-                messages.append(AIConversationMessage(role: .assistant, text: "Your habit is live. You'll find it in your habits list."))
-            } else {
-                errorMessage = appState.aiError ?? appState.habitsError ?? "Please try again."
+            let createdHabit = await appState.createHabitFromAI(candidate: candidate)
+            busyState = nil
+            removeEntry(id: loadingID)
+
+            guard let createdHabit else {
+                setProposalState(.active, for: sourceEntryID)
+                appendError(appState.aiError ?? appState.habitsError ?? "I couldn't save that habit. Please try again.")
+                return
             }
+
+            appendConversationMessage(.init(role: .assistant, text: "Your habit is live. You'll find it in your habits list."))
+            entries.append(.success(createdHabit.name))
         }
     }
 
-    private func beginRevision() {
-        guard let preview else { return }
-        errorMessage = nil
-        previewBeforeRevision = preview
-        self.preview = nil
-        phase = .revising
-        messages.append(AIConversationMessage(role: .assistant, text: "What would you like to change?"))
-    }
+    private func refineCandidate(
+        _ candidate: AIHabitCandidateDTO,
+        instruction: String,
+        userFacingText: String
+    ) {
+        guard !isBusy else { return }
 
-    private func revisePlan(critique: String, priorMessages: [AIConversationMessage]) {
-        guard let activePreview = previewBeforeRevision ?? preview else { return }
-        pendingAction = .revising
-        errorMessage = nil
+        let priorMessages = messages
+        let previousActiveEntryID = activeProposalEntryID
+        if let previousActiveEntryID {
+            setProposalState(.superseded, for: previousActiveEntryID)
+        }
+        appendConversationMessage(.init(role: .user, text: userFacingText))
+
+        let loadingID = appendLoading(.refining)
+        busyState = .refining
+
         Task {
-            let response = await appState.reviseAIPlan(
-                draft: draft,
-                currentPlan: activePreview,
-                critique: critique,
+            let response = await appState.refineAICandidate(
+                idea: ideaContext.isEmpty ? candidate.description : ideaContext,
+                selectedCandidate: candidate,
+                refinement: instruction,
                 recentMessages: priorMessages
             )
-            pendingAction = nil
+            busyState = nil
+            removeEntry(id: loadingID)
+
             guard let response else {
-                preview = previewBeforeRevision ?? activePreview
-                previewBeforeRevision = nil
-                phase = .preview
-                errorMessage = appState.aiError ?? "Please try again."
+                if let previousActiveEntryID {
+                    setProposalState(.active, for: previousActiveEntryID)
+                }
+                appendError(appState.aiError ?? "I couldn't refine that habit. Please try again.")
                 return
             }
-            if response.action == "plan_tweak", let planTweak = response.planTweak {
-                self.preview = planTweak.toAIPlanPreview()
-                previewBeforeRevision = nil
-                phase = .preview
-                messages.append(AIConversationMessage(role: .assistant, text: "Here's the revised plan."))
-                return
-            }
-            if let reopened = response.reopenIntake {
-                self.preview = nil
-                previewBeforeRevision = nil
-                draft = reopened.updatedDraft
-                confirmationSummary = reopened.confirmationSummary
-                phase = reopened.readyForConfirmation ? .confirming : .intake
-                messages.append(AIConversationMessage(role: .assistant, text: reopened.assistantMessage))
-                return
-            }
-            preview = previewBeforeRevision ?? activePreview
-            previewBeforeRevision = nil
-            phase = .preview
-            errorMessage = "Please try again."
+
+            appendConversationMessage(.init(role: .assistant, text: response.assistantMessage))
+            entries.append(
+                .proposalBlock(
+                    whatIHeard: "Updated direction for \(response.candidate.title)",
+                    candidates: [response.candidate],
+                    state: .active
+                )
+            )
         }
     }
 
     private func restartConversation() {
         messages = [Self.introMessage]
-        draft = AIIntakeDraftDTO()
-        phase = .intake
+        entries = [.message(Self.introMessage)]
         input = ""
-        preview = nil
-        previewBeforeRevision = nil
-        confirmationSummary = nil
-        createdHabitName = nil
-        errorMessage = nil
-        pendingAction = nil
+        ideaContext = ""
+        busyState = nil
     }
 
-    private func isAffirmative(_ text: String) -> Bool {
-        ["yes", "y", "confirm", "confirmed", "looks good", "sounds good", "go ahead", "generate"]
-            .contains(text.lowercased())
+    private func appendConversationMessage(_ message: AIConversationMessage) {
+        messages.append(message)
+        entries.append(.message(message))
     }
 
-    // MARK: – Chat bubble
+    private func appendLoading(_ state: AIChatBusyState) -> UUID {
+        let entry = AIChatLogItem.loading(state)
+        entries.append(entry)
+        return entry.id
+    }
+
+    private func appendError(_ text: String) {
+        entries.append(.error(text))
+    }
+
+    private func removeEntry(id: UUID) {
+        entries.removeAll { $0.id == id }
+    }
+
+    private func setProposalState(_ state: AIProposalBlockState, for entryID: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == entryID }) else { return }
+        guard case .proposals(var block) = entries[index].content else { return }
+        block.state = state
+        entries[index].content = .proposals(block)
+    }
+
+    @ViewBuilder
+    private func entryView(_ entry: AIChatLogItem) -> some View {
+        switch entry.content {
+        case .message(let message):
+            bubble(message)
+        case .loading(let state):
+            loadingCard(state)
+        case .proposals(let block):
+            proposalBlockView(block, entryID: entry.id)
+        case .success(let habitName):
+            successCard(createdHabitName: habitName)
+        case .error(let text):
+            errorCard(text)
+        }
+    }
 
     @ViewBuilder
     private func bubble(_ message: AIConversationMessage) -> some View {
         HStack(alignment: .bottom) {
-            if message.role == .user { Spacer(minLength: 48) }
+            if message.role == .user {
+                Spacer(minLength: 48)
+            }
 
             Text(message.text)
                 .font(.subheadline)
@@ -310,192 +310,239 @@ struct AIChatView: View {
                 .background(message.role == .user ? Theme.primary : Theme.cardBeige)
                 .cornerRadius(18)
                 .shadow(color: Theme.shadow, radius: 3, x: 0, y: 1)
-                .frame(maxWidth: 280, alignment: message.role == .user ? .trailing : .leading)
+                .frame(maxWidth: 290, alignment: message.role == .user ? .trailing : .leading)
 
-            if message.role == .assistant { Spacer(minLength: 48) }
+            if message.role == .assistant {
+                Spacer(minLength: 48)
+            }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
     }
 
-    // MARK: – Confirmation card
-
-    private func confirmationCard(summary: String) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            let lines = summary.components(separatedBy: "\n").filter { !$0.isEmpty }
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                    if line.hasPrefix("- ") {
-                        HStack(alignment: .top, spacing: 8) {
-                            Circle().fill(Theme.sage).frame(width: 5, height: 5).padding(.top, 6)
-                            Text(line.dropFirst(2))
-                                .font(.subheadline)
-                                .foregroundColor(Theme.primary)
-                        }
-                    } else {
-                        Text(line)
-                            .font(.subheadline)
-                            .fontWeight(line.contains("captured") || line.contains("Here") ? .semibold : .regular)
-                            .foregroundColor(Theme.primary)
-                    }
-                }
-            }
-
-            Divider().background(Theme.border)
-
-            AppButton("Generate Plan", variant: .primary) {
-                generatePlanFromDraft()
-            }
-            .disabled(isBusy)
-            .opacity(isBusy ? 0.6 : 1)
-        }
-        .padding(16)
-        .background(Theme.white)
-        .cornerRadius(16)
-        .shadow(color: Theme.shadow, radius: 8, x: 0, y: 2)
+    private func loadingCard(_ state: AIChatBusyState) -> some View {
+        AIChatLoadingCard(state: state)
     }
 
-    // MARK: – Plan preview card  (mirrors the "Your Plan is Ready" screen in the Figma)
-
-    private func previewCard(_ planPreview: AIPlanPreview) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-
-            // Plan identity block (warm beige background)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top) {
-                    Image(systemName: planPreview.category.sfSymbol)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Theme.primary)
-                        .frame(width: 38, height: 38)
-                        .background(Theme.sageLight)
-                        .cornerRadius(10)
-                    Spacer()
-                    Text(planPreview.category.displayName)
+    private func proposalBlockView(_ block: AIProposalBlock, entryID: UUID) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Habit Options")
                         .font(.caption)
                         .fontWeight(.semibold)
-                        .foregroundColor(Theme.primary)
+                        .foregroundColor(Theme.textTertiary)
+                        .tracking(1.1)
+
+                    if let whatIHeard = block.whatIHeard, !whatIHeard.isEmpty {
+                        Text("What I heard")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(Theme.primary)
+                        Text(whatIHeard)
+                            .font(.subheadline)
+                            .foregroundColor(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Spacer()
+
+                if block.state != .active {
+                    Text(block.state.badgeTitle)
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(block.state.badgeForeground)
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Theme.sageLight)
+                        .padding(.vertical, 6)
+                        .background(block.state.badgeBackground)
                         .cornerRadius(999)
                 }
-
-                Text(planPreview.title)
-                    .font(.title3)
-                    .fontWeight(.bold)
-                    .foregroundColor(Theme.primary)
-
-                Text(planPreview.description)
-                    .font(.subheadline)
-                    .foregroundColor(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(14)
-            .background(Theme.cardBeige)
-            .cornerRadius(12)
 
-            Spacer().frame(height: 18)
-
-            // Schedule
-            previewSectionLabel("SCHEDULE")
-            Spacer().frame(height: 8)
-            VStack(spacing: 0) {
-                previewScheduleRow(icon: "clock", text: formattedTime(planPreview.triggerValue))
-                Divider().background(Theme.border).padding(.leading, 38)
-                previewScheduleRow(icon: "calendar", text: planPreview.frequencySummary)
-            }
-            .background(Theme.white)
-            .cornerRadius(12)
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
-
-            Spacer().frame(height: 18)
-
-            // Growth plan
-            previewSectionLabel("YOUR GROWTH PLAN")
-            Spacer().frame(height: 8)
-            VStack(spacing: 0) {
-                let sorted = planPreview.progressions.sorted { $0.week < $1.week }
-                ForEach(Array(sorted.enumerated()), id: \.element.week) { index, step in
-                    if index > 0 {
-                        Divider().background(Theme.border).padding(.leading, 46)
-                    }
-                    previewProgressionRow(step: step)
+            VStack(spacing: 12) {
+                ForEach(block.candidates) { candidate in
+                    candidateCard(candidate, isActive: block.state == .active, sourceEntryID: entryID)
                 }
             }
-            .background(Theme.white)
-            .cornerRadius(12)
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
 
-            Spacer().frame(height: 22)
-
-            // Action buttons
-            VStack(spacing: 10) {
-                AppButton("Activate Habit", variant: .primary) {
-                    createHabit()
-                }
-                .disabled(isBusy)
-                .opacity(isBusy ? 0.6 : 1)
-
-                AppButton("Tweak it", variant: .secondary) {
-                    beginRevision()
+            if block.state == .active {
+                AppButton("Start Over", variant: .secondary) {
+                    restartConversation()
                 }
             }
         }
         .padding(16)
         .background(Theme.white)
         .cornerRadius(18)
-        .shadow(color: Theme.shadow, radius: 10, x: 0, y: 3)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(block.state == .active ? Theme.border : Theme.border.opacity(0.6), lineWidth: 1)
+        )
+        .shadow(color: Theme.shadow, radius: 8, x: 0, y: 2)
+        .opacity(block.state == .active ? 1 : 0.62)
+        .allowsHitTesting(block.state == .active)
     }
 
-    @ViewBuilder
-    private func previewSectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundColor(Theme.textTertiary)
-            .tracking(1.4)
+    private func candidateAccentColor(_ candidate: AIHabitCandidateDTO) -> Color {
+        candidate.variant == "ambitious" ? Theme.terracotta : Theme.sage
     }
 
-    @ViewBuilder
-    private func previewScheduleRow(icon: String, text: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundColor(Theme.sage)
-                .frame(width: 20)
-            Text(text)
-                .font(.subheadline)
-                .foregroundColor(Theme.primary)
-            Spacer()
+    private func categorySFSymbol(_ category: String) -> String {
+        switch category.lowercased() {
+        case "fitness":  return "figure.run"
+        case "study":    return "book.closed"
+        case "wellness": return "leaf"
+        case "reading":  return "text.book.closed"
+        case "sleep":    return "moon"
+        default:         return "star"
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
     }
 
-    @ViewBuilder
-    private func previewProgressionRow(step: AIProgressionDTO) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                Circle().fill(Theme.sageLight).frame(width: 32, height: 32)
-                Text("W\(step.week)")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(Theme.primary)
+    private func candidateCard(
+        _ candidate: AIHabitCandidateDTO,
+        isActive: Bool,
+        sourceEntryID: UUID
+    ) -> some View {
+        let accent = candidateAccentColor(candidate)
+        let isAmbitious = candidate.variant == "ambitious"
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: categorySFSymbol(candidate.category))
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(accent)
+                    .frame(width: 38, height: 38)
+                    .background(accent.opacity(0.15))
+                    .cornerRadius(10)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(candidate.title)
+                            .font(.headline)
+                            .fontWeight(isAmbitious ? .bold : .semibold)
+                            .foregroundColor(Theme.primary)
+                        Text(isAmbitious ? "Ambitious" : "Balanced")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .foregroundColor(accent)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(accent.opacity(0.12))
+                            .cornerRadius(999)
+                    }
+                    Text(candidate.description)
+                        .font(.subheadline)
+                        .foregroundColor(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Week \(step.week)")
+
+            HStack(spacing: 10) {
+                candidateMetaPill(icon: "calendar", text: formattedSchedule(candidate.suggestedSchedule), accent: accent)
+                candidateMetaPill(icon: "timer", text: "\(candidate.durationMinutes) min", accent: accent)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Why this fits")
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundColor(Theme.textTertiary)
-                Text(step.description)
+                    .tracking(0.8)
+                Text(candidate.rationale)
                     .font(.subheadline)
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 0)
+
+            if isActive {
+                AppButton("Use This Habit", variant: .primary) {
+                    createHabit(from: candidate, sourceEntryID: sourceEntryID)
+                }
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(14)
+        .background(Theme.cardBeige.opacity(isActive ? 1 : 0.72))
+        .cornerRadius(14)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(accent.opacity(isAmbitious ? 0.35 : 0), lineWidth: 1.5)
+        )
     }
 
-    // MARK: – Success card
+    /// Converts a free-text schedule string from the AI into a compact readable form.
+    /// "Monday, Wednesday, Friday" → "Mon/Wed/Fri"
+    /// "3 times per week" → "3×/week"
+    /// "daily" → "Daily"
+    private func formattedSchedule(_ raw: String) -> String {
+        let lowered = raw.lowercased()
+
+        // Map full day names to 3-letter abbreviations, in calendar order
+        let dayMap: [(full: String, abbr: String)] = [
+            ("sunday", "Sun"), ("monday", "Mon"), ("tuesday", "Tue"),
+            ("wednesday", "Wed"), ("thursday", "Thu"), ("friday", "Fri"), ("saturday", "Sat")
+        ]
+
+        // Collect any day names found, preserving their position in the string
+        var found: [(pos: String.Index, abbr: String)] = []
+        for day in dayMap {
+            if let r = lowered.range(of: day.full) {
+                found.append((pos: r.lowerBound, abbr: day.abbr))
+            }
+        }
+        if !found.isEmpty {
+            return found.sorted { $0.pos < $1.pos }.map(\.abbr).joined(separator: "/")
+        }
+
+        // "X times per week" or "X time per week"
+        let parts = lowered.components(separatedBy: .whitespaces)
+        if let idx = parts.firstIndex(where: { $0 == "times" || $0 == "time" }),
+           idx > 0, let n = Int(parts[idx - 1]) {
+            return "\(n)×/week"
+        }
+
+        if lowered.contains("daily") || lowered.contains("every day") { return "Daily" }
+        if lowered.contains("weekday") { return "Mon–Fri" }
+        if lowered.contains("weekend") { return "Sat/Sun" }
+
+        // Fallback: first 3 words
+        return parts.prefix(3).joined(separator: " ")
+    }
+
+    private func candidateMetaPill(icon: String, text: String, accent: Color = Theme.primary) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+            Text(text)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+        }
+        .foregroundColor(accent)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Theme.white)
+        .cornerRadius(999)
+    }
+
+    private func proposalActionButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(Theme.primary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 38)
+                .background(Theme.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
+                .cornerRadius(10)
+        }
+        .buttonStyle(.plain)
+    }
 
     private func successCard(createdHabitName: String) -> some View {
         VStack(spacing: 16) {
@@ -505,16 +552,19 @@ struct AIChatView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundColor(Theme.primary)
             }
+
             VStack(spacing: 6) {
                 Text("Habit Created")
-                    .font(.title3).fontWeight(.bold)
+                    .font(.title3)
+                    .fontWeight(.bold)
                     .foregroundColor(Theme.primary)
                 Text("\(createdHabitName) has been added to your habits.")
                     .font(.subheadline)
                     .foregroundColor(Theme.textSecondary)
                     .multilineTextAlignment(.center)
             }
-            AppButton("Build Another Habit", variant: .secondary) {
+
+            AppButton("Generate Another Habit", variant: .secondary) {
                 restartConversation()
             }
         }
@@ -524,28 +574,6 @@ struct AIChatView: View {
         .cornerRadius(18)
         .shadow(color: Theme.shadow, radius: 10, x: 0, y: 3)
     }
-
-    // MARK: – Loading card
-
-    private func loadingCard(title: String, message: String) -> some View {
-        HStack(spacing: 14) {
-            ProgressView().tint(Theme.primary)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline).fontWeight(.semibold)
-                    .foregroundColor(Theme.primary)
-                Text(message)
-                    .font(.caption)
-                    .foregroundColor(Theme.textSecondary)
-            }
-            Spacer()
-        }
-        .padding(14)
-        .background(Theme.cardBeige)
-        .cornerRadius(14)
-    }
-
-    // MARK: – Error card
 
     private func errorCard(_ text: String) -> some View {
         HStack(spacing: 12) {
@@ -559,22 +587,153 @@ struct AIChatView: View {
         .padding(14)
         .background(Theme.terracotta.opacity(0.08))
         .cornerRadius(12)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.terracotta.opacity(0.2), lineWidth: 1))
-    }
-
-    // MARK: – Time formatter
-
-    private func formattedTime(_ value: String) -> String {
-        guard let date = BackendHabitMapper.time(from: value) else { return value }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.terracotta.opacity(0.2), lineWidth: 1)
+        )
     }
 }
 
-// MARK: – Animated placeholder
+private enum AIChatBusyState {
+    case proposing
+    case refining
+    case creating
+
+    var rotatingMessages: [String] {
+        switch self {
+        case .proposing:
+            return ["Thinking...", "Working...", "Shaping your habit...", "Building options..."]
+        case .refining:
+            return ["Refining...", "Adjusting the habit...", "Making it fit better...", "Reworking the option..."]
+        case .creating:
+            return ["Saving...", "Locking it in...", "Adding it to FollowThru...", "Almost there..."]
+        }
+    }
+}
+
+private enum AIProposalBlockState {
+    case active
+    case superseded
+    case accepted
+
+    var badgeTitle: String {
+        switch self {
+        case .active:
+            return ""
+        case .superseded:
+            return "Superseded"
+        case .accepted:
+            return "Selected"
+        }
+    }
+
+    var badgeForeground: Color {
+        switch self {
+        case .active:
+            return .clear
+        case .superseded:
+            return Theme.textSecondary
+        case .accepted:
+            return Theme.success
+        }
+    }
+
+    var badgeBackground: Color {
+        switch self {
+        case .active:
+            return .clear
+        case .superseded:
+            return Theme.cardBeige
+        case .accepted:
+            return Theme.sageLight
+        }
+    }
+}
+
+private struct AIProposalBlock {
+    let whatIHeard: String?
+    let candidates: [AIHabitCandidateDTO]
+    var state: AIProposalBlockState
+}
+
+private struct AIChatLogItem: Identifiable {
+    enum Content {
+        case message(AIConversationMessage)
+        case loading(AIChatBusyState)
+        case proposals(AIProposalBlock)
+        case success(String)
+        case error(String)
+    }
+
+    let id: UUID
+    var content: Content
+
+    init(id: UUID = UUID(), content: Content) {
+        self.id = id
+        self.content = content
+    }
+
+    static func message(_ message: AIConversationMessage) -> AIChatLogItem {
+        AIChatLogItem(content: .message(message))
+    }
+
+    static func loading(_ state: AIChatBusyState) -> AIChatLogItem {
+        AIChatLogItem(content: .loading(state))
+    }
+
+    static func proposalBlock(
+        whatIHeard: String?,
+        candidates: [AIHabitCandidateDTO],
+        state: AIProposalBlockState
+    ) -> AIChatLogItem {
+        AIChatLogItem(
+            content: .proposals(
+                AIProposalBlock(
+                    whatIHeard: whatIHeard,
+                    candidates: candidates,
+                    state: state
+                )
+            )
+        )
+    }
+
+    static func success(_ createdHabitName: String) -> AIChatLogItem {
+        AIChatLogItem(content: .success(createdHabitName))
+    }
+
+    static func error(_ text: String) -> AIChatLogItem {
+        AIChatLogItem(content: .error(text))
+    }
+}
+
+private struct AIChatLoadingCard: View {
+    let state: AIChatBusyState
+
+    @State private var currentIndex = 0
+    private let timer = Timer.publish(every: 0.95, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(Theme.primary)
+
+            Text(state.rotatingMessages[currentIndex])
+                .font(.subheadline)
+                .foregroundColor(Theme.primary)
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Theme.cardBeige)
+        .cornerRadius(16)
+        .shadow(color: Theme.shadow, radius: 3, x: 0, y: 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onReceive(timer) { _ in
+            currentIndex = (currentIndex + 1) % state.rotatingMessages.count
+        }
+    }
+}
 
 private struct AnimatedComposerPlaceholder: View {
     let text: String
@@ -629,6 +788,8 @@ private struct AnimatedComposerPlaceholder: View {
     private func restartAnimation() {
         animate = false
         guard textWidth > availableWidth else { return }
-        DispatchQueue.main.async { animate = true }
+        DispatchQueue.main.async {
+            animate = true
+        }
     }
 }

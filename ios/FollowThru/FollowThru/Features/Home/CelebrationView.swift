@@ -7,10 +7,9 @@ struct CelebrationView: View {
     @State private var scale: CGFloat = 0.5
     @State private var countdown = 3
 
+    // read current streak directly from the selected habit
     private var streak: Int {
-        appState.selectedHabit.flatMap { habit in
-            appState.habits.first(where: { $0.id == habit.id })?.streak
-        } ?? 0
+        appState.selectedHabit?.currentStreak ?? 0
     }
 
     var body: some View {
@@ -35,9 +34,13 @@ struct CelebrationView: View {
                 VStack(spacing: 4) {
                     HStack(spacing: 6) {
                         Image(systemName: "flame.fill").foregroundColor(Theme.terracotta)
-                        Text("\(streak)").font(.system(size: 40, weight: .bold)).foregroundColor(Theme.terracotta)
+                        Text("\(streak)")
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundColor(Theme.terracotta)
                     }
-                    Text("day streak").font(.subheadline).foregroundColor(Theme.textSecondary)
+                    Text("day streak")
+                        .font(.subheadline)
+                        .foregroundColor(Theme.textSecondary)
                 }
             }
 

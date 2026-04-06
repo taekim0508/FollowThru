@@ -1,62 +1,124 @@
 import Foundation
 
+// MARK: - User
 struct User: Identifiable, Codable {
     var id: String
     var email: String
     var username: String
 }
 
-enum HabitCategory: String, Codable, CaseIterable, Hashable {
-    case fitness
-    case study
-    case wellness
-    case reading
-    case sleep
-
-    var displayName: String {
-        rawValue.capitalized
-    }
-
-    var sfSymbol: String {
-        switch self {
-        case .fitness:  return "figure.run"
-        case .study:    return "book.closed"
-        case .wellness: return "leaf"
-        case .reading:  return "text.book.closed"
-        case .sleep:    return "moon"
-        }
-    }
-}
-
-enum KPIType: String, Codable, CaseIterable {
-    case checkbox = "Completion"
-    case duration = "Duration (min)"
-    case count    = "Amount"
-}
-
+// MARK: - Habit
 struct Habit: Identifiable, Codable, Hashable {
-    var id: String
+    // MARK: Core
+    let id: Int
     var name: String
-    var category: HabitCategory = .wellness
-    var description: String = ""
-    var kpiType: KPIType = .checkbox
-    var scheduledDays: [Int] = []   // 1 = Sun … 7 = Sat
-    var scheduledTime: Date? = nil
-    var streak: Int = 0
-    var createdAt: Date = Date()
+    var description: String
+    var category: String
+    // "active" | "paused" | "archived"
+    var status: String
+    // optional motivation — why the user wants to build this habit
+    var motivationStatement: String?
+
+    // MARK: Habit Type
+    // "binary"  = checkbox, just did it or not
+    // "tracked" = numeric target, user logs a value toward a goal
+    var habitType: String
+
+    // numeric goal for tracked habits (e.g. 30 for "30 minutes", 10 for "10 pages")
+    // null for binary habits
+    var targetValue: Double?
+
+    // display label for the numeric value (e.g. "minutes", "pages", "reps")
+    // null for binary habits
+    var quantityUnit: String?
+
+    // MARK: Scheduling
+    // "time" = time-based trigger | "location" = geofence-based (future)
+    var triggerType: String
+
+    // null = no reminder set, "HH:MM" = time-based reminder
+    var triggerValue: String?
+
+    // scheduled days — {"days": ["monday", "tuesday"...]}
+    // always present. all 7 days = every day.
+    var frequencyPattern: FrequencyPattern
+
+    // MARK: Today's Progress
+    // current logged value for today (nil if not logged yet)
+    var todayProgress: Double?
+
+    // same as targetValue — included for convenience
+    var todayTarget: Double?
+
+    // whether today's habit is fully complete
+    var todayComplete: Bool
+
+    // MARK: Streak
+    // consecutive scheduled days completed (respects schedule, has grace period)
+    var currentStreak: Int
+
+    // lifetime best streak — never resets
+    var maxStreak: Int
+
+    // last date a completion was counted toward streak
+    var streakLastUpdated: String?
+
+    // MARK: Timestamps
+    var createdAt: String?
+    var updatedAt: String?
 }
 
+// MARK: - FrequencyPattern
+// mirrors backend {"days": ["monday", "tuesday"...]}
+struct FrequencyPattern: Codable, Hashable {
+    var days: [String]
+
+    // convenience — check if a given weekday name is scheduled
+    // weekday name should be lowercase e.g. "monday"
+    func includes(_ weekdayName: String) -> Bool {
+        days.contains(weekdayName.lowercased())
+    }
+
+    // convenience — check if a given Date is a scheduled day
+    func includesDate(_ date: Date) -> Bool {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE"  // full weekday name e.g. "Monday"
+        let name = formatter.string(from: date).lowercased()
+        return days.contains(name)
+    }
+
+    // all 7 days selected — treat as every day
+    var isEveryDay: Bool {
+        days.count == 7
+    }
+}
+
+// MARK: - HabitLog
+// local representation of a completion record from the backend
 struct HabitLog: Identifiable, Codable {
-    var id: String = UUID().uuidString
-    var habitId: String
-    var date: Date
-    var completed: Bool
-    var value: Double? = nil        // for duration / count KPIs
-    var note: String? = nil
+    var id: Int
+    var habitId: Int
+    var completedDate: String    // "YYYY-MM-DD"
+    var progressValue: Double?
+    var isComplete: Bool
+    var note: String?
+}
+
+// MARK: - Completion response from POST /complete or PATCH /progress
+struct CompletionResponse: Codable {
+    let id: Int
+    let habitId: Int
+    let userId: Int
+    let completedDate: String
+    let progressValue: Double?
+    let isComplete: Bool
+    let note: String?
+    let currentStreak: Int
+    let maxStreak: Int
 }
 
 // MARK: - Community
-// (Backend JSON uses snake_case; decoder uses convertFromSnakeCase)
+// (backend JSON uses snake_case — decoder uses convertFromSnakeCase)
 
 struct UserSearchResult: Codable, Identifiable {
     let id: Int

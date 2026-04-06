@@ -23,27 +23,24 @@ struct MainTabView: View {
             HomeView()
                 .tabItem { Label("Home", systemImage: "house") }
 
-            CalendarView()
-                .tabItem { Label("Calendar", systemImage: "calendar") }
+            // commented out bc may be obsolete with progress view
+            //CalendarView()
+                //.tabItem { Label("Calendar", systemImage: "calendar") }
+            
+            InsightsView()
+                .tabItem { Label("Insights", systemImage: "chart.xyaxis.line") }
 
             AIChatView()
                 .tabItem { Label("AI", systemImage: "sparkles") }
 
-            ProgressShellView()
-                .tabItem { Label("Progress", systemImage: "chart.bar") }
-
+            
             CommunityView()
                 .tabItem { Label("Community", systemImage: "person.2") }
-
+            
+            
             ProfileView()
                 .tabItem { Label("Profile", systemImage: "person") }
         }
         .accentColor(Theme.primary)
-        .sheet(isPresented: $appState.showCompletionModal) {
-            if let habit = appState.selectedHabit {
-                CompletionModalView(habit: habit)
-                    .presentationDetents([.medium])
-            }
-        }
     }
 }

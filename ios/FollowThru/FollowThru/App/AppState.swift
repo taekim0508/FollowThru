@@ -4,23 +4,90 @@ import Combine
 
 @MainActor
 final class AppState: ObservableObject {
+
+    // MARK: - Auth
     @Published var isAuthenticated: Bool = false
     @Published var currentUser: User? = nil
-    @Published var habits: [Habit] = []
-    @Published var logs: [HabitLog] = []
-    @Published var selectedHabit: Habit? = nil
-    @Published var showCompletionModal: Bool = false
-
-    // Auth state
     @Published var isAuthLoading: Bool = false
     @Published var authError: String? = nil
+
+    // MARK: - Habits
+    @Published var habits: [Habit] = []
     @Published var isHabitsLoading: Bool = false
     @Published var habitsError: String? = nil
+
+    // MARK: - Completion Modal
+    @Published var selectedHabit: Habit? = nil
+
+    // MARK: - AI
     @Published var isAILoading: Bool = false
     @Published var aiError: String? = nil
     @Published var latestAIPlan: AIPlanPreview? = nil
 
-    // Community
+    @discardableResult
+    func requestAIHabitProposals(
+        recentMessages: [AIConversationMessage],
+        latestUserMessage: String
+    ) async -> AIHabitProposalResponseDTO? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            return try await AIAPI.proposeHabits(
+                AIHabitProposalRequestDTO(
+                    recentMessages: recentMessages.map { $0.toDTO() },
+                    latestUserMessage: latestUserMessage
+                )
+            )
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func refineAICandidate(
+        idea: String,
+        selectedCandidate: AIHabitCandidateDTO,
+        refinement: String,
+        recentMessages: [AIConversationMessage]
+    ) async -> AIRefineCandidateResponseDTO? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            return try await AIAPI.refineCandidate(
+                AIRefineCandidateRequestDTO(
+                    idea: idea,
+                    selectedCandidate: selectedCandidate,
+                    refinement: refinement,
+                    recentMessages: recentMessages.map { $0.toDTO() }
+                )
+            )
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func createHabitFromAI(candidate: AIHabitCandidateDTO) async -> Habit? {
+        isAILoading = true
+        aiError = nil
+        defer { isAILoading = false }
+        do {
+            let response = try await AIAPI.createCandidate(
+                AICreateCandidateRequestDTO(candidate: candidate)
+            )
+            await loadHabits()
+            return habits.first { $0.id == response.habit.id }
+        } catch {
+            aiError = errorMessage(from: error)
+            return nil
+        }
+    }
+
+    // MARK: - Community
     @Published var communityFeed: [FeedPost] = []
     @Published var friendInbox: [FriendInboxItem] = []
     @Published var friendsList: [FriendProfile] = []
@@ -28,66 +95,62 @@ final class AppState: ObservableObject {
     @Published var communityError: String? = nil
     @Published var isCommunityLoading: Bool = false
 
+    // MARK: - Date Helpers
+
+    private var todayString: String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
     // MARK: - Auth
 
     func register(email: String, password: String, username: String) async {
         isAuthLoading = true
         authError = nil
-        defer { isAuthLoading = false }
-
         do {
-            let (user, token) = try await AuthAPI.register(email: email, password: password, name: username)
+            let (user, token) = try await AuthAPI.register(
+                email: email, password: password, name: username
+            )
             TokenStore.save(token)
             currentUser = user
             isAuthenticated = true
-            _ = await refreshHabits()
+            await checkStreaksAndLoadHabits()
         } catch {
-            if let err = error as? LocalizedError, let msg = err.errorDescription {
-                authError = msg
-            } else {
-                authError = error.localizedDescription
-            }
+            authError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+        isAuthLoading = false
     }
 
     func login(email: String, password: String) async {
         isAuthLoading = true
         authError = nil
-        defer { isAuthLoading = false }
-
         do {
             let (user, token) = try await AuthAPI.login(email: email, password: password)
             TokenStore.save(token)
             currentUser = user
             isAuthenticated = true
-            _ = await refreshHabits()
+            await checkStreaksAndLoadHabits()
         } catch {
-            if let err = error as? LocalizedError, let msg = err.errorDescription {
-                authError = msg
-            } else {
-                authError = error.localizedDescription
-            }
+            authError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+        isAuthLoading = false
     }
 
     func restoreSessionIfNeeded() async {
         guard TokenStore.hasToken, !isAuthenticated else { return }
-
         isAuthLoading = true
-        authError = nil
-        defer { isAuthLoading = false }
-
         do {
             let user = try await AuthAPI.getMe()
             currentUser = user
             isAuthenticated = true
-            _ = await refreshHabits()
+            await checkStreaksAndLoadHabits()
         } catch {
-            // If token is invalid/expired, clear it and stay logged out.
             TokenStore.clear()
             isAuthenticated = false
             currentUser = nil
         }
+        isAuthLoading = false
     }
 
     func logout() {
@@ -95,7 +158,6 @@ final class AppState: ObservableObject {
         isAuthenticated = false
         currentUser = nil
         habits = []
-        logs = []
         selectedHabit = nil
         communityFeed = []
         friendInbox = []
@@ -105,6 +167,221 @@ final class AppState: ObservableObject {
         habitsError = nil
         aiError = nil
         latestAIPlan = nil
+    }
+
+    func updateAccount(
+        name: String? = nil,
+        email: String? = nil,
+        currentPassword: String? = nil,
+        newPassword: String? = nil
+    ) async {
+        isAuthLoading = true
+        authError = nil
+        do {
+            let user = try await AuthAPI.updateMe(
+                name: name,
+                email: email,
+                currentPassword: currentPassword,
+                newPassword: newPassword
+            )
+            currentUser = user
+        } catch {
+            authError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        isAuthLoading = false
+    }
+
+    // MARK: - Habits
+
+    func loadHabits() async {
+        guard isAuthenticated else { return }
+        isHabitsLoading = true
+        habitsError = nil
+        do {
+            habits = try await HabitsAPI.listHabits()
+        } catch {
+            habitsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        isHabitsLoading = false
+    }
+
+    /// Called once per day on app launch.
+    /// Resets broken streaks then returns updated habit list in one call.
+    /// Falls back to regular loadHabits if check-streaks fails.
+    func checkStreaksAndLoadHabits() async {
+        guard isAuthenticated else { return }
+
+        // only call check-streaks once per calendar day
+        let today = todayString
+        let lastChecked = UserDefaults.standard.string(forKey: "lastStreakCheckDate")
+
+        if lastChecked == today {
+            // already checked today — just load habits normally
+            await loadHabits()
+            return
+        }
+
+        isHabitsLoading = true
+        habitsError = nil
+        do {
+            habits = try await HabitsAPI.checkStreaks()
+            UserDefaults.standard.set(today, forKey: "lastStreakCheckDate")
+        } catch {
+            // fallback to regular load if check-streaks fails
+            await loadHabits()
+        }
+        isHabitsLoading = false
+    }
+
+    func createHabit(
+        name: String,
+        description: String,
+        category: String,
+        habitType: String,
+        targetValue: Double?,
+        quantityUnit: String?,
+        triggerValue: String?,  // changed to Optional
+        frequencyPattern: [String: [String]],
+        motivationStatement: String? = nil
+    ) async {
+        habitsError = nil
+        do {
+            _ = try await HabitsAPI.createHabit(
+                name: name,
+                description: description,
+                category: category,
+                habitType: habitType,
+                targetValue: targetValue,
+                quantityUnit: quantityUnit,
+                triggerValue: triggerValue,
+                frequencyPattern: frequencyPattern,
+                motivationStatement: motivationStatement
+            )
+            await loadHabits()
+        } catch {
+            habitsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func updateHabit(
+        _ habit: Habit,
+        name: String? = nil,
+        description: String? = nil,
+        triggerValue: Nullable<String>? = nil,  // changed
+        frequencyPattern: [String: [String]]? = nil,
+        habitType: String? = nil,
+        targetValue: Double? = nil,
+        quantityUnit: String? = nil,
+        status: String? = nil,
+        category: String? = nil,
+        motivationStatement: String? = nil
+    ) async {
+        habitsError = nil
+        do {
+            _ = try await HabitsAPI.updateHabit(
+                id: habit.id,
+                name: name,
+                description: description,
+                triggerValue: triggerValue,
+                frequencyPattern: frequencyPattern,
+                habitType: habitType,
+                targetValue: targetValue,
+                quantityUnit: quantityUnit,
+                status: status,
+                category: category,
+                motivationStatement: motivationStatement
+            )
+            await loadHabits()
+        } catch {
+            habitsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func deleteHabit(_ habit: Habit) async {
+        habitsError = nil
+        do {
+            try await HabitsAPI.deleteHabit(id: habit.id)
+            habits.removeAll { $0.id == habit.id }
+        } catch {
+            habitsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    // MARK: - Completions
+
+    /// Complete a binary habit or create the first log for a tracked habit.
+    func completeHabit(_ habit: Habit, note: String? = nil) async {
+        habitsError = nil
+        do {
+            let result = try await HabitsAPI.completeHabit(
+                habitId: habit.id,
+                completedDate: todayString,
+                note: note
+            )
+            updateHabitStreakLocally(habitId: habit.id, result: result)
+            await loadHabits()
+        } catch {
+            habitsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Log a progress value for a tracked habit.
+    /// Uses POST if no log exists today, PATCH if one already exists.
+    func logProgress(_ habit: Habit, progressValue: Double, note: String? = nil) async {
+        habitsError = nil
+        do {
+            let result: CompletionResponse
+            if habit.todayProgress == nil {
+                // no log yet today — create it
+                result = try await HabitsAPI.completeHabit(
+                    habitId: habit.id,
+                    completedDate: todayString,
+                    progressValue: progressValue,
+                    note: note
+                )
+            } else {
+                // log exists — update it
+                result = try await HabitsAPI.updateProgress(
+                    habitId: habit.id,
+                    completedDate: todayString,
+                    progressValue: progressValue,
+                    note: note
+                )
+            }
+            updateHabitStreakLocally(habitId: habit.id, result: result)
+            await loadHabits()
+        } catch {
+            habitsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Update streak fields locally so UI reflects changes immediately
+    /// without waiting for the next full loadHabits() call.
+    private func updateHabitStreakLocally(habitId: Int, result: CompletionResponse) {
+        if let idx = habits.firstIndex(where: { $0.id == habitId }) {
+            habits[idx].currentStreak = result.currentStreak
+            habits[idx].maxStreak = result.maxStreak
+            habits[idx].todayComplete = result.isComplete
+            habits[idx].todayProgress = result.progressValue
+        }
+    }
+
+    // MARK: - Habit Helpers
+
+    /// Habits scheduled for today's weekday
+    var todaysHabits: [Habit] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE"
+        let todayName = formatter.string(from: Date()).lowercased()
+        return habits.filter { $0.frequencyPattern.days.contains(todayName) }
+    }
+
+    /// Habits NOT scheduled for today
+    var nonTodayHabits: [Habit] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE"
+        let todayName = formatter.string(from: Date()).lowercased()
+        return habits.filter { !$0.frequencyPattern.days.contains(todayName) }
     }
 
     // MARK: - Community
@@ -121,30 +398,19 @@ final class AppState: ObservableObject {
             friendInbox = try await inbox
             friendsList = try await friends
         } catch {
-            if let e = error as? LocalizedError, let msg = e.errorDescription {
-                communityError = msg
-            } else {
-                communityError = error.localizedDescription
-            }
+            communityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         isCommunityLoading = false
     }
 
     func searchUsers(query: String) async {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard q.count >= 2 else {
-            userSearchResults = []
-            return
-        }
+        guard q.count >= 2 else { userSearchResults = []; return }
         communityError = nil
         do {
             userSearchResults = try await CommunityAPI.searchUsers(query: q)
         } catch {
-            if let e = error as? LocalizedError, let msg = e.errorDescription {
-                communityError = msg
-            } else {
-                communityError = error.localizedDescription
-            }
+            communityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -154,11 +420,7 @@ final class AppState: ObservableObject {
             try await CommunityAPI.sendFriendRequest(receiverId: receiverId)
             await loadCommunityData()
         } catch {
-            if let e = error as? LocalizedError, let msg = e.errorDescription {
-                communityError = msg
-            } else {
-                communityError = error.localizedDescription
-            }
+            communityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -168,11 +430,7 @@ final class AppState: ObservableObject {
             try await CommunityAPI.acceptFriendRequest(requestId: requestId)
             await loadCommunityData()
         } catch {
-            if let e = error as? LocalizedError, let msg = e.errorDescription {
-                communityError = msg
-            } else {
-                communityError = error.localizedDescription
-            }
+            communityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -182,11 +440,7 @@ final class AppState: ObservableObject {
             try await CommunityAPI.declineFriendRequest(requestId: requestId)
             await loadCommunityData()
         } catch {
-            if let e = error as? LocalizedError, let msg = e.errorDescription {
-                communityError = msg
-            } else {
-                communityError = error.localizedDescription
-            }
+            communityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -200,11 +454,7 @@ final class AppState: ObservableObject {
             }
             communityFeed = try await CommunityAPI.feed(limit: 40)
         } catch {
-            if let e = error as? LocalizedError, let msg = e.errorDescription {
-                communityError = msg
-            } else {
-                communityError = error.localizedDescription
-            }
+            communityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -216,110 +466,11 @@ final class AppState: ObservableObject {
             _ = try await CommunityAPI.addComment(postId: postId, text: trimmed)
             communityFeed = try await CommunityAPI.feed(limit: 40)
         } catch {
-            if let e = error as? LocalizedError, let msg = e.errorDescription {
-                communityError = msg
-            } else {
-                communityError = error.localizedDescription
-            }
+            communityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
-    /// Update profile (name, email, password). Pass only fields that changed; use nil to skip.
-    func updateAccount(name: String? = nil, email: String? = nil, currentPassword: String? = nil, newPassword: String? = nil) async {
-        isAuthLoading = true
-        authError = nil
-        defer { isAuthLoading = false }
-
-        do {
-            let user = try await AuthAPI.updateMe(name: name, email: email, currentPassword: currentPassword, newPassword: newPassword)
-            currentUser = user
-        } catch {
-            if let err = error as? LocalizedError, let msg = err.errorDescription {
-                authError = msg
-            } else {
-                authError = error.localizedDescription
-            }
-        }
-    }
-
-    // MARK: - Habits & logs
-
-    @discardableResult
-    func refreshHabits() async -> Bool {
-        guard isAuthenticated else {
-            habits = []
-            logs = []
-            selectedHabit = nil
-            return false
-        }
-
-        isHabitsLoading = true
-        habitsError = nil
-        defer { isHabitsLoading = false }
-
-        do {
-            let backendHabits = try await HabitsAPI.listHabits()
-            let completionMap = Dictionary(uniqueKeysWithValues: try await loadCompletions(for: backendHabits))
-
-            let refreshedHabits = backendHabits.map { backendHabit in
-                backendHabit.toAppHabit(completions: completionMap[backendHabit.id] ?? [])
-            }
-            let refreshedLogs = completionMap.values.flatMap { $0 }.map { $0.toAppHabitLog() }
-
-            habits = refreshedHabits.sorted { $0.createdAt < $1.createdAt }
-            logs = refreshedLogs.sorted { $0.date > $1.date }
-            selectedHabit = refreshedSelection(from: refreshedHabits)
-            return true
-        } catch {
-            habitsError = errorMessage(from: error)
-            return false
-        }
-    }
-
-    @discardableResult
-    func createHabit(_ draft: AppHabitDraft) async -> Habit? {
-        habitsError = nil
-
-        do {
-            let appHabit = try await HabitsAPI.createHabit(draft.toCreateRequest()).toAppHabit()
-            upsertHabit(appHabit)
-            return appHabit
-        } catch {
-            habitsError = errorMessage(from: error)
-            return nil
-        }
-    }
-
-    @discardableResult
-    func requestAIPlan(
-        goal: String,
-        category: HabitCategory,
-        context: AIRequestContext? = nil
-    ) async -> AIPlanPreview? {
-        isAILoading = true
-        aiError = nil
-        defer { isAILoading = false }
-
-        do {
-            let response = try await AIAPI.generatePlan(
-                AIGenerateRequestDTO(
-                    userGoal: goal,
-                    category: category,
-                    context: context
-                )
-            )
-            let preview = response.habitPayload.toAIPlanPreview(
-                provider: response.provider,
-                model: response.model,
-                progressions: response.progressions
-            )
-            latestAIPlan = preview
-            return preview
-        } catch {
-            aiError = errorMessage(from: error)
-            return nil
-        }
-    }
+    // MARK: - AI
 
     @discardableResult
     func submitAIIntake(
@@ -330,7 +481,6 @@ final class AppState: ObservableObject {
         isAILoading = true
         aiError = nil
         defer { isAILoading = false }
-
         do {
             return try await AIAPI.intake(
                 AIIntakeRequestDTO(
@@ -350,7 +500,6 @@ final class AppState: ObservableObject {
         isAILoading = true
         aiError = nil
         defer { isAILoading = false }
-
         do {
             let response = try await AIAPI.generatePlan(from: draft)
             let preview = response.habitPayload.toAIPlanPreview(
@@ -367,43 +516,10 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    func createHabitFromAI(
-        goal: String,
-        category: HabitCategory,
-        context: AIRequestContext? = nil
-    ) async -> Habit? {
+    func createHabitFromAI(draft: AIIntakeDraftDTO) async -> AICreatedHabitDTO? {
         isAILoading = true
         aiError = nil
         defer { isAILoading = false }
-
-        do {
-            let response = try await AIAPI.generateAndCreate(
-                AIGenerateRequestDTO(
-                    userGoal: goal,
-                    category: category,
-                    context: context
-                )
-            )
-            latestAIPlan = response.habitPayload.toAIPlanPreview(
-                provider: response.provider,
-                model: response.model,
-                progressions: response.progressions
-            )
-            let appHabit = response.habit.toAppHabit()
-            upsertHabit(appHabit)
-            return appHabit
-        } catch {
-            aiError = errorMessage(from: error)
-            return nil
-        }
-    }
-
-    @discardableResult
-    func createHabitFromAI(draft: AIIntakeDraftDTO) async -> Habit? {
-        isAILoading = true
-        aiError = nil
-        defer { isAILoading = false }
-
         do {
             let response = try await AIAPI.generateAndCreate(from: draft)
             latestAIPlan = response.habitPayload.toAIPlanPreview(
@@ -411,9 +527,8 @@ final class AppState: ObservableObject {
                 model: response.model,
                 progressions: response.progressions
             )
-            let appHabit = response.habit.toAppHabit()
-            upsertHabit(appHabit)
-            return appHabit
+            await loadHabits()
+            return response.habit
         } catch {
             aiError = errorMessage(from: error)
             return nil
@@ -430,7 +545,6 @@ final class AppState: ObservableObject {
         isAILoading = true
         aiError = nil
         defer { isAILoading = false }
-
         do {
             let response = try await AIAPI.revisePlan(
                 AIRevisePlanRequestDTO(
@@ -447,92 +561,6 @@ final class AppState: ObservableObject {
         } catch {
             aiError = errorMessage(from: error)
             return nil
-        }
-    }
-
-    func logsFor(habit: Habit, in month: Date) -> [HabitLog] {
-        let cal = Calendar.current
-        return logs.filter {
-            $0.habitId == habit.id &&
-            cal.isDate($0.date, equalTo: month, toGranularity: .month)
-        }
-    }
-
-    func isCompleted(habit: Habit, on date: Date = Date()) -> Bool {
-        let cal = Calendar.current
-        return logs.contains {
-            $0.habitId == habit.id &&
-            $0.completed &&
-            cal.isDate($0.date, inSameDayAs: date)
-        }
-    }
-
-    @discardableResult
-    func markComplete(habit: Habit, note: String? = nil, on date: Date = Date()) async -> Bool {
-        habitsError = nil
-
-        guard let habitID = Int(habit.id) else {
-            habitsError = "Habit is unavailable"
-            return false
-        }
-
-        do {
-            let completion = try await CompletionsAPI.completeHabit(
-                habitID: habitID,
-                completedDate: BackendHabitMapper.dateOnlyString(from: date),
-                note: note
-            )
-            applyCompletion(completion.toAppHabitLog())
-            return true
-        } catch {
-            habitsError = errorMessage(from: error)
-            return false
-        }
-    }
-
-    private func loadCompletions(for backendHabits: [BackendHabit]) async throws -> [(Int, [BackendCompletion])] {
-        try await withThrowingTaskGroup(of: (Int, [BackendCompletion]).self) { group in
-            for habit in backendHabits {
-                group.addTask {
-                    let completions = try await CompletionsAPI.listCompletions(habitID: habit.id)
-                    return (habit.id, completions)
-                }
-            }
-
-            var pairs: [(Int, [BackendCompletion])] = []
-            for try await pair in group {
-                pairs.append(pair)
-            }
-            return pairs
-        }
-    }
-
-    private func refreshedSelection(from habits: [Habit]) -> Habit? {
-        guard let selectedHabit else { return habits.first }
-        return habits.first { $0.id == selectedHabit.id } ?? habits.first
-    }
-
-    private func upsertHabit(_ habit: Habit) {
-        if let index = habits.firstIndex(where: { $0.id == habit.id }) {
-            habits[index] = habit
-        } else {
-            habits.append(habit)
-            habits.sort { $0.createdAt < $1.createdAt }
-        }
-    }
-
-    private func applyCompletion(_ log: HabitLog) {
-        logs.removeAll { existingLog in
-            existingLog.habitId == log.habitId && Calendar.current.isDate(existingLog.date, inSameDayAs: log.date)
-        }
-        logs.append(log)
-        logs.sort { $0.date > $1.date }
-
-        if let index = habits.firstIndex(where: { $0.id == log.habitId }) {
-            let completionDates = logs
-                .filter { $0.habitId == log.habitId && $0.completed }
-                .map(\.date)
-            habits[index].streak = BackendHabitMapper.streak(for: completionDates)
         }
     }
 

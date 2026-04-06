@@ -5,12 +5,20 @@ struct ProfileView: View {
 
     private let achievements = ["🔥 7 Day Streak", "✅ First Habit", "🌅 Early Bird"]
 
+    private var maxStreak: Int {
+        appState.habits.map { $0.maxStreak }.max() ?? 0
+    }
+
+    private var totalCompleted: Int {
+        appState.habits.filter { $0.todayComplete }.count
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
 
-                    // Avatar + name
+                    // avatar + name
                     VStack(spacing: 8) {
                         Image(systemName: "person.circle.fill")
                             .font(.system(size: 80))
@@ -24,7 +32,7 @@ struct ProfileView: View {
                     }
                     .padding(.top, 16)
 
-                    // Achievements
+                    // achievements
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Achievements")
                             .font(.headline)
@@ -46,13 +54,13 @@ struct ProfileView: View {
                         }
                     }
 
-                    // Stats row
+                    // stats row
                     HStack(spacing: 0) {
                         statCell(value: "\(appState.habits.count)", label: "Habits")
                         Divider().frame(height: 40)
-                        statCell(value: "\(appState.logs.filter { $0.completed }.count)", label: "Completed")
+                        statCell(value: "\(totalCompleted)", label: "Done Today")
                         Divider().frame(height: 40)
-                        statCell(value: "\(maxStreak())", label: "Best Streak")
+                        statCell(value: "\(maxStreak)", label: "Best Streak")
                     }
                     .padding()
                     .background(Theme.white)
@@ -60,7 +68,7 @@ struct ProfileView: View {
                     .shadow(color: Theme.shadow, radius: 8, x: 0, y: 2)
                     .padding(.horizontal)
 
-                    // Settings link
+                    // settings
                     NavigationLink(destination: SettingsView()) {
                         HStack {
                             Image(systemName: "gearshape").foregroundColor(Theme.primary)
@@ -75,7 +83,7 @@ struct ProfileView: View {
                         .padding(.horizontal)
                     }
 
-                    // Sign out
+                    // sign out
                     AppButton("Sign Out", variant: .secondary) {
                         appState.logout()
                     }
@@ -86,6 +94,11 @@ struct ProfileView: View {
             .background(Theme.background.ignoresSafeArea())
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                Task {
+                    await appState.loadHabits()
+                }
+            }
         }
     }
 
@@ -96,9 +109,5 @@ struct ProfileView: View {
             Text(label).font(.caption).foregroundColor(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private func maxStreak() -> Int {
-        appState.habits.map { $0.streak }.max() ?? 0
     }
 }
