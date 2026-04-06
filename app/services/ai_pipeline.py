@@ -2855,27 +2855,39 @@ def _parse_candidates(raw_candidates: List[dict]) -> List:
     return results
 
 
+_FREQUENCY_KEYWORDS: List[tuple] = [
+    # (keywords, frequency value)
+    (["every day", "everyday", "daily", "each day", "7 days"], "daily"),
+    (["weekday", "weekdays", "mon-fri", "monday through friday"], "weekdays"),
+    (["weekend", "weekends", "saturday and sunday"], "weekends"),
+]
+
+_WELLNESS_WATER_KEYWORDS = frozenset([
+    "water", "drink", "hydrat", "cup", "liter", "litre", "fluid",
+])
+
+
 def _apply_rule_based_fallbacks(message: str, draft: AIIntakeDraft) -> AIIntakeDraft:
     """
     Apply deterministic rule-based extraction as a safety net after Tier 1.
 
-    GPT-4o-mini sometimes omits habit_type/target_value/quantity_unit from
-    extracted{} even when the extraction rules tell it to include them.
-    This function looks at the current message AND the draft's goal_summary
-    to fill those fields reliably without another API call.
+    The AI (GPT-4o-mini) sometimes returns action='advise' for clear habit-
+    creation intent, and omits goal_summary / category / frequency / habit_type
+    from extracted{}. This function fills all of those gaps from the user's
+    message without an extra API call.
 
-    Only fills fields that are still at their default / None — never overwrites
-    something the AI already extracted correctly.
+    Only writes fields that are still None / default — never overwrites
+    something the AI extracted correctly.
     """
     data = draft.model_dump()
+    lower = message.lower()
+    all_text = lower  # may extend below
 
-    # Only apply if habit_type hasn't been upgraded to "tracked" yet
+    # --- habit_type / target_value / quantity_unit ---
     if data.get("habit_type", "binary") == "binary":
-        # Check current message first, then fall back to goal_summary
         texts_to_check = [message]
         if draft.goal_summary:
             texts_to_check.append(draft.goal_summary)
-
         for text in texts_to_check:
             inferred_type, inferred_target, inferred_unit = _infer_habit_type_from_text(text)
             if inferred_type == "tracked":
@@ -2884,7 +2896,39 @@ def _apply_rule_based_fallbacks(message: str, draft: AIIntakeDraft) -> AIIntakeD
                     data["target_value"] = inferred_target
                 if data.get("quantity_unit") is None and inferred_unit is not None:
                     data["quantity_unit"] = inferred_unit
-                break  # first match wins
+                break
+
+    # --- category ---
+    if not data.get("category"):
+        # Water / hydration → wellness (not in _HABIT_KEYWORD_MAP)
+        if any(kw in lower for kw in _WELLNESS_WATER_KEYWORDS):
+            data["category"] = "wellness"
+        else:
+            for cat, keywords in _HABIT_KEYWORD_MAP.items():
+                if any(kw in lower for kw in keywords):
+                    data["category"] = cat
+                    break
+            # fallback: check goal_summary
+            if not data.get("category") and draft.goal_summary:
+                gs_lower = draft.goal_summary.lower()
+                if any(kw in gs_lower for kw in _WELLNESS_WATER_KEYWORDS):
+                    data["category"] = "wellness"
+                else:
+                    for cat, keywords in _HABIT_KEYWORD_MAP.items():
+                        if any(kw in gs_lower for kw in keywords):
+                            data["category"] = cat
+                            break
+
+    # --- goal_summary (use user's message as-is when AI didn't extract one) ---
+    if not data.get("goal_summary") and message.strip():
+        data["goal_summary"] = message.strip()[:200]
+
+    # --- frequency ---
+    if not data.get("frequency"):
+        for freq_keywords, freq_value in _FREQUENCY_KEYWORDS:
+            if any(kw in lower for kw in freq_keywords):
+                data["frequency"] = freq_value
+                break
 
     return AIIntakeDraft(**data)
 
@@ -2950,21 +2994,22 @@ def chat(
     updated_draft = _merge_extracted(draft, extracted)
 
     # --- Rule-based fallback extraction ---
-    # Apply to every user message in the conversation so far (message + goal_summary).
-    # This ensures habit_type/target_value/quantity_unit are reliably set even when
-    # the AI omits them from extracted{}.
+    # Fills habit_type, target_value, quantity_unit, category, goal_summary,
+    # and frequency from the user's message when the AI omits them.
     updated_draft = _apply_rule_based_fallbacks(message, updated_draft)
 
-    # Redirect / advise — return immediately, no Tier 2
-    if action in ("redirect", "advise"):
+    # Hard redirect — never generate
+    if action == "redirect":
         return AIChatResponse(
-            action=action,
+            action="redirect",
             assistant_message=assistant_message,
             updated_draft=updated_draft,
             candidates=[],
         )
 
-    # Compute confidence after merging this turn's extractions
+    # Compute confidence BEFORE checking advise/clarify.
+    # Tier 2 fires whenever confidence is high enough, regardless of whether
+    # the AI labelled this turn as "clarify" or "advise".
     confidence = _compute_confidence(updated_draft)
 
     # --- Tier 2: generate when confident enough ---
@@ -2980,9 +3025,9 @@ def chat(
             candidates=candidates,
         )
 
-    # --- Still clarifying ---
+    # --- Still gathering info (clarify or advise) ---
     return AIChatResponse(
-        action="clarify",
+        action=action,
         assistant_message=assistant_message,
         updated_draft=updated_draft,
         candidates=[],
