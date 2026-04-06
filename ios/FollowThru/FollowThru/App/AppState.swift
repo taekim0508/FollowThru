@@ -24,12 +24,20 @@ final class AppState: ObservableObject {
     @Published var aiError: String? = nil
 
     @discardableResult
-    func sendChatMessage(message: String, draft: AIIntakeDraftDTO) async -> AIChatResponseDTO? {
+    func sendChatMessage(
+        message: String,
+        draft: AIIntakeDraftDTO,
+        recentMessages: [AIConversationMessage]
+    ) async -> AIChatResponseDTO? {
         isAILoading = true
         aiError = nil
         defer { isAILoading = false }
         do {
-            return try await AIAPI.chat(AIChatRequestDTO(message: message, draft: draft))
+            return try await AIAPI.chat(AIChatRequestDTO(
+                message: message,
+                draft: draft,
+                recentMessages: recentMessages.map { $0.toDTO() }
+            ))
         } catch {
             aiError = errorMessage(from: error)
             return nil

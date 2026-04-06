@@ -448,6 +448,7 @@ def chat_endpoint(
         return ai_chat(
             message=payload.message,
             draft=payload.draft,
+            recent_messages=payload.recent_messages,
         )
     except AIPipelineConfigError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))

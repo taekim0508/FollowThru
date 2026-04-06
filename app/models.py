@@ -311,6 +311,7 @@ class AIChatRequest(BaseModel):
     """Single-turn chat request. Draft carries session state between turns."""
     message: str
     draft: AIIntakeDraft = PydanticField(default_factory=AIIntakeDraft)
+    recent_messages: List[AIChatMessage] = PydanticField(default_factory=list)
 
 
 class AIChatCandidate(BaseModel):

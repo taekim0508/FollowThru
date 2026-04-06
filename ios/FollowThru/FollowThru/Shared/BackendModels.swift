@@ -293,6 +293,7 @@ extension AIPlanPreview {
 struct AIChatRequestDTO: Codable {
     let message: String
     let draft: AIIntakeDraftDTO
+    let recentMessages: [AIConversationMessageDTO]
 }
 
 struct AIChatCandidateDTO: Codable, Identifiable {
