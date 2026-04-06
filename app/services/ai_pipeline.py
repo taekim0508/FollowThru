@@ -1337,13 +1337,6 @@ def _combined_user_idea(recent_messages: Sequence[AIChatMessage], latest_user_me
     return " ".join(unique_parts)
 
 
-def _has_prior_clarification(recent_messages: Sequence[AIChatMessage]) -> bool:
-    return any(
-        message.role == "assistant" and "what kind of change" in message.content.lower()
-        for message in recent_messages[-6:]
-    )
-
-
 def _has_prior_experience_ask(recent_messages: Sequence[AIChatMessage]) -> bool:
     """Returns True if the assistant has already asked about experience level."""
     experience_ask_phrases = [
@@ -1504,16 +1497,6 @@ def _inferred_experience_from_idea(idea: str) -> str:
     if any(kw in lower for kw in ["lock in", "serious", "grind", "used to studying", "i study a lot"]):
         return "intermediate"
     return "beginner"
-
-
-def _default_duration_for_category(category: str) -> int:
-    return {
-        "fitness": 15,
-        "study": 20,
-        "wellness": 10,
-        "reading": 15,
-        "sleep": 20,
-    }.get(category, 15)
 
 
 def _proposal_variants(

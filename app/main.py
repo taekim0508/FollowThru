@@ -1,10 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .database import create_db_and_tables
-from .routes import habits, completions, friends, auth, debug, community, analytics
 from .database import create_db_and_tables, engine
 from .migrations import run_migrations
-from .routes import habits, completions, friends, auth, debug, community, ai
+from .routes import habits, completions, friends, auth, debug, community, analytics, ai
 
 app = FastAPI(title="HabitFlow API", version="1.0.0")
 
