@@ -101,9 +101,14 @@ struct AIChatView: View {
         isBusy = true
 
         let currentDraft = draft
+        let priorMessages = messages
 
         Task {
-            let response = await appState.sendChatMessage(message: trimmed, draft: currentDraft)
+            let response = await appState.sendChatMessage(
+                message: trimmed,
+                draft: currentDraft,
+                recentMessages: priorMessages
+            )
             isBusy = false
             removeEntry(id: loadingID)
 
