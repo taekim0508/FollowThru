@@ -2619,12 +2619,32 @@ ALWAYS ASK — never infer or assume:
   → schedule_days → trigger_value
 - Once all required fields are gathered, wrap up warmly. Do NOT generate the plan yourself.
 
+━━━ EXTRACTION RULES — put every recognised value in extracted{} immediately ━━━
+
+When the user mentions a quantity (e.g. "2 liters", "8 glasses", "10,000 steps"):
+  extracted must include ALL THREE: habit_type, target_value, quantity_unit
+  e.g. {"habit_type": "tracked", "target_value": 2.0, "quantity_unit": "liters"}
+
+When the user mentions specific days or a schedule:
+  extracted must include schedule_days as a list of lowercase day names
+  "every day except Sundays" → {"schedule_days": ["monday","tuesday","wednesday","thursday","friday","saturday"]}
+  "weekdays" → {"schedule_days": ["monday","tuesday","wednesday","thursday","friday"]}
+
+When the user mentions a specific time (e.g. "8am", "8:00 am", "6:30 in the morning"):
+  extracted must include trigger_value in 24-hour HH:MM format
+  "8:00 am" → {"trigger_value": "08:00"}
+  "6:30 in the morning" → {"trigger_value": "06:30"}
+  Also extract preferred_time: "morning" | "afternoon" | "evening"
+
+Never leave extracted{} empty when the user's message contains any of the above.
+If nothing new was said, extracted{} may be omitted or {}.
+
 RESPONSE FORMAT — always return valid JSON:
 {
   "action": "clarify" | "advise" | "redirect",
   "assistant_message": "...",
   "extracted": {
-    // only include fields extracted or inferred this turn; omit everything else
+    // every field recognised this turn — do not omit fields the user just stated
   }
 }
 """
@@ -2664,8 +2684,9 @@ RULES
 - Each variant must have a distinct duration_minutes and/or schedule that reflects \
   the balanced vs ambitious difference.
 - progression: 4 weeks, each week slightly increasing challenge.
-- trigger_type: always "time"; trigger_value: "HH:MM" 24-hour format matching \
-  preferred_time (morning→07:00, afternoon→14:00, evening→20:00, flexible→07:00).
+- trigger_type: always "time"; trigger_value: "HH:MM" 24-hour format.
+  If the draft contains trigger_value, use it exactly.
+  Otherwise fall back to preferred_time (morning→07:00, afternoon→14:00, evening→20:00, flexible→07:00).
 - frequency_type: "daily" if daily/weekdays/weekends; "specific_days" for named days.
 - frequency_pattern: {"days": [...]} — only include for specific_days, else omit.
 
@@ -2786,7 +2807,7 @@ def _merge_extracted(draft: AIIntakeDraft, extracted: dict) -> AIIntakeDraft:
         "goal_summary", "habit_description", "frequency", "schedule_mode",
         "schedule_days", "duration_minutes", "experience_level", "category",
         "preferred_time", "available_time", "motivation_statement",
-        "habit_type", "target_value", "quantity_unit",
+        "habit_type", "target_value", "quantity_unit", "trigger_value",
     }
     for key, val in extracted.items():
         if key not in allowed or val is None:
