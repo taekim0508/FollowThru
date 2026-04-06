@@ -175,7 +175,7 @@ struct HabitCreateRequestDTO: Codable, Hashable {
     let category: String
     let description: String
     let triggerType: String
-    let triggerValue: String
+    let triggerValue: String?
     let frequencyType: String
     let frequencyPattern: BackendFrequencyPattern?
     let requiresQuantity: Bool
@@ -246,7 +246,7 @@ struct AIPlanPreview: Identifiable, Hashable {
     let title: String
     let category: String
     let description: String
-    let triggerValue: String
+    let triggerValue: String?
     let frequencySummary: String
     let progressions: [AIProgressionDTO]
     let habitPayload: HabitCreateRequestDTO
