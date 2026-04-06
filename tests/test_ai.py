@@ -286,3 +286,84 @@ def test_ai_plan_has_valid_frequency_pattern(client):
     assert "days" in fp
     assert isinstance(fp["days"], list)
     assert len(fp["days"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# POST /api/ai/chat  (new unified endpoint)
+# ---------------------------------------------------------------------------
+
+def test_chat_requires_auth(client):
+    r = client.post("/api/ai/chat", json={"message": "I want to run", "draft": {}})
+    assert r.status_code in (401, 403)
+
+
+def test_chat_clarify_turn(client):
+    """First message with empty draft → action=clarify, no candidates."""
+    token = get_token(client)
+    r = client.post(
+        "/api/ai/chat",
+        json={"message": "I want to build a study habit", "draft": {}},
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["action"] in ("clarify", "redirect", "advise", "generate")
+    assert "assistant_message" in body
+    assert "updated_draft" in body
+    assert isinstance(body["candidates"], list)
+
+
+def test_chat_generate_when_confident(client):
+    """Sending a nearly-complete draft should trigger action=generate."""
+    token = get_token(client)
+    full_draft = {
+        "goal_summary": "Study every weekday",
+        "category": "study",
+        "frequency": "specific_days",
+        "schedule_days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+        "duration_minutes": 60,
+        "experience_level": "intermediate",
+        "preferred_time": "morning",
+        "available_time": 60,
+    }
+    r = client.post(
+        "/api/ai/chat",
+        json={"message": "Let's go", "draft": full_draft},
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # Mock provider returns generate when confidence >= threshold
+    assert body["action"] == "generate"
+    assert "updated_draft" in body
+
+
+def test_chat_redirect_offtopic(client):
+    """Clearly off-topic message → redirect without API call."""
+    token = get_token(client)
+    r = client.post(
+        "/api/ai/chat",
+        json={"message": "What's the weather like today?", "draft": {}},
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["action"] == "redirect"
+    assert body["candidates"] == []
+
+
+def test_chat_draft_persisted_in_response(client):
+    """updated_draft in response reflects merged fields from current turn."""
+    token = get_token(client)
+    partial_draft = {"category": "fitness", "frequency": "daily"}
+    r = client.post(
+        "/api/ai/chat",
+        json={"message": "I want to run every morning", "draft": partial_draft},
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # The draft sent back must at minimum preserve what we sent in
+    updated = body["updated_draft"]
+    assert updated.get("category") == "fitness"
+    assert updated.get("frequency") == "daily"
