@@ -22,23 +22,14 @@ final class AppState: ObservableObject {
     // MARK: - AI
     @Published var isAILoading: Bool = false
     @Published var aiError: String? = nil
-    @Published var latestAIPlan: AIPlanPreview? = nil
 
     @discardableResult
-    func requestAIHabitProposals(
-        recentMessages: [AIConversationMessage],
-        latestUserMessage: String
-    ) async -> AIHabitProposalResponseDTO? {
+    func sendChatMessage(message: String, draft: AIIntakeDraftDTO) async -> AIChatResponseDTO? {
         isAILoading = true
         aiError = nil
         defer { isAILoading = false }
         do {
-            return try await AIAPI.proposeHabits(
-                AIHabitProposalRequestDTO(
-                    recentMessages: recentMessages.map { $0.toDTO() },
-                    latestUserMessage: latestUserMessage
-                )
-            )
+            return try await AIAPI.chat(AIChatRequestDTO(message: message, draft: draft))
         } catch {
             aiError = errorMessage(from: error)
             return nil
@@ -46,38 +37,24 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    func refineAICandidate(
-        idea: String,
-        selectedCandidate: AIHabitCandidateDTO,
-        refinement: String,
-        recentMessages: [AIConversationMessage]
-    ) async -> AIRefineCandidateResponseDTO? {
+    func createHabitFromChatCandidate(_ candidate: AIChatCandidateDTO) async -> Habit? {
         isAILoading = true
         aiError = nil
         defer { isAILoading = false }
         do {
-            return try await AIAPI.refineCandidate(
-                AIRefineCandidateRequestDTO(
-                    idea: idea,
-                    selectedCandidate: selectedCandidate,
-                    refinement: refinement,
-                    recentMessages: recentMessages.map { $0.toDTO() }
-                )
+            let habitCandidate = AIHabitCandidateDTO(
+                title: candidate.title,
+                category: candidate.category,
+                description: candidate.description,
+                suggestedSchedule: candidate.suggestedSchedule,
+                durationMinutes: candidate.durationMinutes,
+                rationale: candidate.rationale,
+                variant: candidate.variant,
+                habitPayload: candidate.habitPayload,
+                progressions: candidate.progressions
             )
-        } catch {
-            aiError = errorMessage(from: error)
-            return nil
-        }
-    }
-
-    @discardableResult
-    func createHabitFromAI(candidate: AIHabitCandidateDTO) async -> Habit? {
-        isAILoading = true
-        aiError = nil
-        defer { isAILoading = false }
-        do {
             let response = try await AIAPI.createCandidate(
-                AICreateCandidateRequestDTO(candidate: candidate)
+                AICreateCandidateRequestDTO(candidate: habitCandidate)
             )
             await loadHabits()
             return habits.first { $0.id == response.habit.id }
@@ -166,7 +143,6 @@ final class AppState: ObservableObject {
         communityError = nil
         habitsError = nil
         aiError = nil
-        latestAIPlan = nil
     }
 
     func updateAccount(
@@ -467,100 +443,6 @@ final class AppState: ObservableObject {
             communityFeed = try await CommunityAPI.feed(limit: 40)
         } catch {
             communityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        }
-    }
-
-    // MARK: - AI
-
-    @discardableResult
-    func submitAIIntake(
-        recentMessages: [AIConversationMessage],
-        currentDraft: AIIntakeDraftDTO,
-        latestUserMessage: String
-    ) async -> AIIntakeResponseDTO? {
-        isAILoading = true
-        aiError = nil
-        defer { isAILoading = false }
-        do {
-            return try await AIAPI.intake(
-                AIIntakeRequestDTO(
-                    recentMessages: recentMessages.map { $0.toDTO() },
-                    currentDraft: currentDraft,
-                    latestUserMessage: latestUserMessage
-                )
-            )
-        } catch {
-            aiError = errorMessage(from: error)
-            return nil
-        }
-    }
-
-    @discardableResult
-    func requestAIPlan(from draft: AIIntakeDraftDTO) async -> AIPlanPreview? {
-        isAILoading = true
-        aiError = nil
-        defer { isAILoading = false }
-        do {
-            let response = try await AIAPI.generatePlan(from: draft)
-            let preview = response.habitPayload.toAIPlanPreview(
-                provider: response.provider,
-                model: response.model,
-                progressions: response.progressions
-            )
-            latestAIPlan = preview
-            return preview
-        } catch {
-            aiError = errorMessage(from: error)
-            return nil
-        }
-    }
-
-    @discardableResult
-    func createHabitFromAI(draft: AIIntakeDraftDTO) async -> AICreatedHabitDTO? {
-        isAILoading = true
-        aiError = nil
-        defer { isAILoading = false }
-        do {
-            let response = try await AIAPI.generateAndCreate(from: draft)
-            latestAIPlan = response.habitPayload.toAIPlanPreview(
-                provider: response.provider,
-                model: response.model,
-                progressions: response.progressions
-            )
-            await loadHabits()
-            return response.habit
-        } catch {
-            aiError = errorMessage(from: error)
-            return nil
-        }
-    }
-
-    @discardableResult
-    func reviseAIPlan(
-        draft: AIIntakeDraftDTO,
-        currentPlan: AIPlanPreview,
-        critique: String,
-        recentMessages: [AIConversationMessage]
-    ) async -> AIRevisePlanResponseDTO? {
-        isAILoading = true
-        aiError = nil
-        defer { isAILoading = false }
-        do {
-            let response = try await AIAPI.revisePlan(
-                AIRevisePlanRequestDTO(
-                    draft: draft,
-                    currentPlan: currentPlan.toSnapshotDTO(),
-                    critique: critique,
-                    recentMessages: recentMessages.map { $0.toDTO() }
-                )
-            )
-            if let planTweak = response.planTweak {
-                latestAIPlan = planTweak.toAIPlanPreview()
-            }
-            return response
-        } catch {
-            aiError = errorMessage(from: error)
-            return nil
         }
     }
 
