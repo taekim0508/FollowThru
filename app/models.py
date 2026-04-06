@@ -307,6 +307,41 @@ class AICreateCandidateRequest(BaseModel):
     candidate: AIHabitCandidate
 
 
+# ===== NEW CHAT MODELS =====
+
+class AIChatRequest(BaseModel):
+    """Single-turn chat request. Draft carries session state between turns."""
+    message: str
+    draft: AIIntakeDraft = PydanticField(default_factory=AIIntakeDraft)
+
+
+class AIChatCandidate(BaseModel):
+    """One habit variant returned by the chat endpoint."""
+    title: str
+    category: str
+    description: str
+    suggested_schedule: str
+    duration_minutes: int
+    rationale: str
+    variant: str                        # "balanced" | "ambitious"
+    habit_payload: HabitCreate
+    progressions: List[dict]
+
+
+class AIChatResponse(BaseModel):
+    """
+    action:
+      clarify  — AI needs more info; assistant_message has the question
+      generate — two candidates ready; candidates list is populated
+      advise   — general domain advice; ends with soft habit pivot
+      redirect — off-topic or out-of-scope; assistant_message explains scope
+    """
+    action: str
+    assistant_message: str
+    updated_draft: AIIntakeDraft
+    candidates: List[AIChatCandidate] = PydanticField(default_factory=list)
+
+
 # ===== FRIENDS MODELS =====
 
 class FriendRequest(SQLModel, table=True):
