@@ -6,6 +6,7 @@ import pytest
 from app.models import AIIntakeDraft
 from app.services.ai_pipeline import (
     _CONFIDENCE_THRESHOLD,
+    _apply_rule_based_fallbacks,
     _compute_confidence,
     _coerce_schedule_days,
     _is_clearly_offtopic,
@@ -433,3 +434,69 @@ class TestCoerceScheduleDays:
         draft = AIIntakeDraft(schedule_days=["monday"])
         result = _merge_extracted(draft, {"schedule_days": "some nonsense"})
         assert result.schedule_days == ["monday"]
+
+
+# ---------------------------------------------------------------------------
+# _apply_rule_based_fallbacks — catches AI extraction misses
+# ---------------------------------------------------------------------------
+
+class TestApplyRuleBasedFallbacks:
+    """Regression: confidence capped at 0.75 when AI missed habit_type extraction."""
+
+    def test_glasses_message_sets_tracked(self):
+        """'8 glasses of water a day' → habit_type=tracked, target_value=8, unit=glasses."""
+        draft = AIIntakeDraft()  # binary by default
+        result = _apply_rule_based_fallbacks("I want to drink 8 glasses of water a day", draft)
+        assert result.habit_type == "tracked"
+        assert result.target_value == 8.0
+        assert result.quantity_unit == "glasses"
+
+    def test_liters_message_sets_tracked(self):
+        draft = AIIntakeDraft()
+        result = _apply_rule_based_fallbacks("drink 2 liters of water", draft)
+        assert result.habit_type == "tracked"
+        assert result.target_value == 2.0
+
+    def test_steps_message_sets_tracked(self):
+        draft = AIIntakeDraft()
+        result = _apply_rule_based_fallbacks("I want to walk 10000 steps a day", draft)
+        assert result.habit_type == "tracked"
+
+    def test_pages_message_sets_tracked(self):
+        draft = AIIntakeDraft()
+        result = _apply_rule_based_fallbacks("read 20 pages every night", draft)
+        assert result.habit_type == "tracked"
+        assert result.target_value == 20.0
+
+    def test_does_not_overwrite_already_tracked(self):
+        """If AI already extracted habit_type=tracked, rule-based must not clobber it."""
+        draft = AIIntakeDraft(habit_type="tracked", target_value=5.0, quantity_unit="km")
+        result = _apply_rule_based_fallbacks("run 5 km every morning", draft)
+        assert result.habit_type == "tracked"
+        assert result.target_value == 5.0
+        assert result.quantity_unit == "km"
+
+    def test_falls_back_to_goal_summary(self):
+        """If the current message has no quantity, check goal_summary instead."""
+        draft = AIIntakeDraft(goal_summary="drink 8 glasses of water a day")
+        result = _apply_rule_based_fallbacks("Yes. A morning reminder", draft)
+        assert result.habit_type == "tracked"
+        assert result.target_value == 8.0
+
+    def test_binary_message_stays_binary(self):
+        """A habit with no measurable quantity stays binary."""
+        draft = AIIntakeDraft()
+        result = _apply_rule_based_fallbacks("I want to meditate every morning", draft)
+        assert result.habit_type == "binary"
+
+    def test_confidence_reaches_threshold_after_fallback(self):
+        """End-to-end: water habit reaches ≥0.80 confidence after rule-based fallback."""
+        draft = AIIntakeDraft(
+            goal_summary="drink 8 glasses of water a day",
+            category="wellness",
+            schedule_days=["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"],
+            # habit_type still "binary" — simulates AI omitting it
+        )
+        fixed = _apply_rule_based_fallbacks("Yes. A morning reminder", draft)
+        assert fixed.habit_type == "tracked"
+        assert _compute_confidence(fixed) >= _CONFIDENCE_THRESHOLD

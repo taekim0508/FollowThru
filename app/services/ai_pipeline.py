@@ -63,6 +63,7 @@ _TRACKED_PATTERNS: List[tuple] = [
     (re.compile(r"(\d+)\s*pages?", re.I),              1, "pages"),
     (re.compile(r"(\d+)\s*glasses?", re.I),            1, "glasses"),
     (re.compile(r"(\d+)\s*(?:cups?|liters?|litres?|oz)", re.I), 1, "glasses"),
+    (re.compile(r"(\d+)\s*steps?", re.I),               1, "steps"),
     (re.compile(r"(\d+)\s*reps?", re.I),               1, "reps"),
     (re.compile(r"(\d+)\s*push\s*ups?", re.I),         1, "reps"),
     (re.compile(r"(\d+)\s*sit\s*ups?", re.I),          1, "reps"),
@@ -2854,6 +2855,40 @@ def _parse_candidates(raw_candidates: List[dict]) -> List:
     return results
 
 
+def _apply_rule_based_fallbacks(message: str, draft: AIIntakeDraft) -> AIIntakeDraft:
+    """
+    Apply deterministic rule-based extraction as a safety net after Tier 1.
+
+    GPT-4o-mini sometimes omits habit_type/target_value/quantity_unit from
+    extracted{} even when the extraction rules tell it to include them.
+    This function looks at the current message AND the draft's goal_summary
+    to fill those fields reliably without another API call.
+
+    Only fills fields that are still at their default / None — never overwrites
+    something the AI already extracted correctly.
+    """
+    data = draft.model_dump()
+
+    # Only apply if habit_type hasn't been upgraded to "tracked" yet
+    if data.get("habit_type", "binary") == "binary":
+        # Check current message first, then fall back to goal_summary
+        texts_to_check = [message]
+        if draft.goal_summary:
+            texts_to_check.append(draft.goal_summary)
+
+        for text in texts_to_check:
+            inferred_type, inferred_target, inferred_unit = _infer_habit_type_from_text(text)
+            if inferred_type == "tracked":
+                data["habit_type"] = "tracked"
+                if data.get("target_value") is None and inferred_target is not None:
+                    data["target_value"] = inferred_target
+                if data.get("quantity_unit") is None and inferred_unit is not None:
+                    data["quantity_unit"] = inferred_unit
+                break  # first match wins
+
+    return AIIntakeDraft(**data)
+
+
 def chat(
     message: str,
     draft: AIIntakeDraft,
@@ -2913,6 +2948,12 @@ def chat(
     extracted = tier1.get("extracted", {})
 
     updated_draft = _merge_extracted(draft, extracted)
+
+    # --- Rule-based fallback extraction ---
+    # Apply to every user message in the conversation so far (message + goal_summary).
+    # This ensures habit_type/target_value/quantity_unit are reliably set even when
+    # the AI omits them from extracted{}.
+    updated_draft = _apply_rule_based_fallbacks(message, updated_draft)
 
     # Redirect / advise — return immediately, no Tier 2
     if action in ("redirect", "advise"):
