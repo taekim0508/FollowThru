@@ -2474,3 +2474,321 @@ def revise_habit_plan(
         model=revised_plan.model,
         plan_tweak=revised_plan,
     )
+
+
+# =============================================================================
+# TWO-TIER CHAT ARCHITECTURE
+# =============================================================================
+
+# Fields required before Tier 2 fires (confidence gate).
+_CONFIDENCE_FIELDS: List[tuple] = [
+    # (field_name, weight)  — weights sum to 1.0
+    ("goal_summary", 0.25),
+    ("category", 0.20),
+    ("frequency", 0.20),
+    ("duration_minutes", 0.15),
+    ("experience_level", 0.10),
+    ("schedule_days", 0.10),  # non-empty list counts as present
+]
+_CONFIDENCE_THRESHOLD = 0.80
+
+# Cheap pre-filter keyword sets (no API call).
+_OFFTOPIC_KEYWORDS = {
+    "weather", "stock", "crypto", "bitcoin", "ethereum", "politics",
+    "election", "movie", "film", "music", "song", "recipe", "cook",
+    "dating", "relationship", "sports score", "football", "soccer",
+    "basketball", "baseball", "nba", "nfl", "mlb",
+}
+_HABIT_KEYWORDS = {
+    "habit", "routine", "goal", "workout", "exercise", "study", "sleep",
+    "read", "meditate", "run", "walk", "practice", "train", "gym",
+    "journal", "drink water", "stretch", "yoga", "wake up", "morning",
+    "evening", "daily", "weekly", "schedule", "remind",
+}
+
+
+def _compute_confidence(draft: AIIntakeDraft) -> float:
+    """Rule-based confidence from field coverage. Pure Python — no AI involved."""
+    score = 0.0
+    for field, weight in _CONFIDENCE_FIELDS:
+        value = getattr(draft, field, None)
+        if field == "schedule_days":
+            if value:  # non-empty list
+                score += weight
+        elif value is not None:
+            score += weight
+    return round(score, 3)
+
+
+def _is_clearly_offtopic(message: str) -> bool:
+    """Cheap keyword check. Returns True only when confidently off-topic."""
+    lower = message.lower()
+    # If the message mentions any habit-related term, it's probably in-scope.
+    if any(kw in lower for kw in _HABIT_KEYWORDS):
+        return False
+    return any(kw in lower for kw in _OFFTOPIC_KEYWORDS)
+
+
+_TIER1_SYSTEM_PROMPT = """\
+You are HabitFlow's intake assistant. Your job is to gather information about the \
+user's habit goal through natural, conversational questions — one question at a time.
+
+You extract structured fields from what the user says and decide whether to:
+- ask a clarifying question (action: "clarify")
+- answer a general habit-domain question and pivot back to creation (action: "advise")
+- politely redirect if clearly out-of-scope (action: "redirect")
+
+EXTRACTION RULES
+- goal_summary: one-sentence plain-English description of what they want to do
+- category: one of fitness | study | wellness | reading | sleep
+- frequency: one of daily | weekly | specific_days
+- schedule_days: list of lowercase day names e.g. ["monday","wednesday","friday"]
+- duration_minutes: integer; honor exactly what the user states (no caps)
+- experience_level: beginner | intermediate | advanced — infer from context:
+    * "third year", "3rd year", "grad student", "phd", "masters", "law school",
+      "med school", "college senior" → intermediate
+    * "serious", "grind", "i study a lot" → intermediate
+    * "just starting", "new to", "never done" → beginner
+    * anything implying years of practice → advanced
+- preferred_time: morning | afternoon | evening | flexible
+- motivation_statement: the user's "why" if they mention it
+- habit_type: "binary" unless they mention a measurable quantity → "tracked"
+- target_value + quantity_unit: only for tracked habits
+
+CONVERSATION RULES
+- Ask ONE question at a time. Never list multiple questions.
+- Do not repeat a question if the user already answered it (check current_draft).
+- Priority order for missing fields: goal_summary → category → duration_minutes \
+→ frequency → schedule_days → experience_level
+- If confident enough (all required fields present), say so warmly but do NOT \
+generate the plan yourself — the system handles that.
+
+RESPONSE FORMAT — always return valid JSON:
+{
+  "action": "clarify" | "advise" | "redirect",
+  "assistant_message": "...",
+  "extracted": {
+    // only include fields you actually extracted this turn; omit others
+  }
+}
+"""
+
+
+def _tier1_call(
+    message: str,
+    draft: AIIntakeDraft,
+    recent_messages: List[AIChatMessage],
+    model: str,
+) -> dict:
+    """Tier 1: extract fields + determine intent. Returns raw JSON dict."""
+    draft_dict = {k: v for k, v in draft.model_dump().items() if v is not None and v != [] and v != "flexible" and v != 15}
+
+    messages: List[Dict[str, str]] = [{"role": "system", "content": _TIER1_SYSTEM_PROMPT}]
+
+    # Include recent context (capped)
+    for m in recent_messages[-MAX_RECENT_MESSAGES:]:
+        messages.append({"role": m.role, "content": m.content})
+
+    user_payload = {
+        "user_message": message,
+        "current_draft": draft_dict,
+    }
+    messages.append({"role": "user", "content": json.dumps(user_payload)})
+
+    return _call_openai_messages_for_json(messages, model)
+
+
+_TIER2_SYSTEM_PROMPT = """\
+You are HabitFlow's habit planner. Given a complete habit intake draft, generate \
+exactly two habit variants: "balanced" (sustainable) and "ambitious" (challenging).
+
+RULES
+- Honor duration_minutes exactly as given — do NOT reduce or cap it.
+- Use category, frequency, schedule_days, experience_level to shape each plan.
+- Each variant must have a distinct duration_minutes and/or schedule that reflects \
+  the balanced vs ambitious difference.
+- progression: 4 weeks, each week slightly increasing challenge.
+- trigger_type: always "time"; trigger_value: "HH:MM" 24-hour format matching \
+  preferred_time (morning→07:00, afternoon→14:00, evening→20:00, flexible→07:00).
+- frequency_type: "daily" if daily/weekdays/weekends; "specific_days" for named days.
+- frequency_pattern: {"days": [...]} — only include for specific_days, else omit.
+
+RESPONSE FORMAT — valid JSON only:
+{
+  "candidates": [
+    {
+      "title": "...",
+      "category": "fitness|study|wellness|reading|sleep",
+      "description": "...",
+      "suggested_schedule": "...",
+      "duration_minutes": 60,
+      "rationale": "...",
+      "variant": "balanced",
+      "habit_payload": {
+        "name": "...",
+        "category": "...",
+        "description": "...",
+        "trigger_type": "time",
+        "trigger_value": "07:00",
+        "frequency_type": "daily",
+        "frequency_pattern": null,
+        "requires_quantity": false,
+        "quantity_unit": null,
+        "allows_notes": true,
+        "motivation_statement": null
+      },
+      "progressions": [
+        {"week": 1, "description": "..."},
+        {"week": 2, "description": "..."},
+        {"week": 3, "description": "..."},
+        {"week": 4, "description": "..."}
+      ]
+    },
+    { "variant": "ambitious", ... }
+  ],
+  "summary_message": "Here are two plans I put together for you:"
+}
+"""
+
+
+def _tier2_call(draft: AIIntakeDraft, model: str) -> dict:
+    """Tier 2: generate both variants from a confident draft. Returns raw JSON dict."""
+    messages: List[Dict[str, str]] = [
+        {"role": "system", "content": _TIER2_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(draft.model_dump())},
+    ]
+    return _call_openai_messages_for_json(messages, model)
+
+
+def _merge_extracted(draft: AIIntakeDraft, extracted: dict) -> AIIntakeDraft:
+    """Merge fields extracted by Tier 1 into the current draft."""
+    data = draft.model_dump()
+    allowed = {
+        "goal_summary", "habit_description", "frequency", "schedule_mode",
+        "schedule_days", "duration_minutes", "experience_level", "category",
+        "preferred_time", "available_time", "motivation_statement",
+        "habit_type", "target_value", "quantity_unit",
+    }
+    for key, val in extracted.items():
+        if key in allowed and val is not None:
+            data[key] = val
+    return AIIntakeDraft(**data)
+
+
+def _parse_candidates(raw_candidates: List[dict]) -> List:
+    """Parse Tier 2 candidate dicts into AIChatCandidate models (imported lazily)."""
+    from ..models import AIChatCandidate
+
+    results = []
+    for c in raw_candidates:
+        try:
+            payload_dict = c.get("habit_payload", {})
+            habit_payload = HabitCreate(**payload_dict)
+            results.append(AIChatCandidate(
+                title=c.get("title", "Habit Plan"),
+                category=c.get("category", "wellness"),
+                description=c.get("description", ""),
+                suggested_schedule=c.get("suggested_schedule", ""),
+                duration_minutes=int(c.get("duration_minutes", 30)),
+                rationale=c.get("rationale", ""),
+                variant=c.get("variant", "balanced"),
+                habit_payload=habit_payload,
+                progressions=c.get("progressions", []),
+            ))
+        except Exception:
+            continue
+    return results
+
+
+def chat(
+    message: str,
+    draft: AIIntakeDraft,
+    recent_messages: Optional[List[AIChatMessage]] = None,
+) -> "AIChatResponse":
+    """
+    Single-turn chat handler — the public entry point for /api/ai/chat.
+
+    Returns AIChatResponse with one of four actions:
+      clarify  — Tier 1 needs more info
+      generate — Tier 2 fired; candidates populated
+      advise   — domain Q&A with habit pivot
+      redirect — off-topic
+    """
+    from ..models import AIChatResponse
+
+    if recent_messages is None:
+        recent_messages = []
+
+    provider, model = _provider_and_model()
+
+    # --- Pre-filter (no API cost) ---
+    if _is_clearly_offtopic(message):
+        return AIChatResponse(
+            action="redirect",
+            assistant_message=(
+                "I'm focused on helping you build habits. "
+                "What's one thing you'd like to change about your daily routine?"
+            ),
+            updated_draft=draft,
+            candidates=[],
+        )
+
+    # --- Mock provider short-circuit ---
+    if provider == "mock":
+        updated = _merge_extracted(draft, {})
+        confidence = _compute_confidence(updated)
+        if confidence >= _CONFIDENCE_THRESHOLD:
+            return AIChatResponse(
+                action="generate",
+                assistant_message="Here are two plans I put together for you.",
+                updated_draft=updated,
+                candidates=[],
+            )
+        return AIChatResponse(
+            action="clarify",
+            assistant_message="What category does this habit fall under — fitness, study, wellness, reading, or sleep?",
+            updated_draft=updated,
+            candidates=[],
+        )
+
+    # --- Tier 1: extract + intent ---
+    tier1 = _tier1_call(message, draft, recent_messages, model)
+
+    action = tier1.get("action", "clarify")
+    assistant_message = tier1.get("assistant_message", "")
+    extracted = tier1.get("extracted", {})
+
+    updated_draft = _merge_extracted(draft, extracted)
+
+    # Redirect / advise — return immediately, no Tier 2
+    if action in ("redirect", "advise"):
+        return AIChatResponse(
+            action=action,
+            assistant_message=assistant_message,
+            updated_draft=updated_draft,
+            candidates=[],
+        )
+
+    # Compute confidence after merging this turn's extractions
+    confidence = _compute_confidence(updated_draft)
+
+    # --- Tier 2: generate when confident enough ---
+    if confidence >= _CONFIDENCE_THRESHOLD:
+        tier2 = _tier2_call(updated_draft, model)
+        raw_candidates = tier2.get("candidates", [])
+        candidates = _parse_candidates(raw_candidates)
+        summary = tier2.get("summary_message", "Here are two plans I built for you.")
+        return AIChatResponse(
+            action="generate",
+            assistant_message=summary,
+            updated_draft=updated_draft,
+            candidates=candidates,
+        )
+
+    # --- Still clarifying ---
+    return AIChatResponse(
+        action="clarify",
+        assistant_message=assistant_message,
+        updated_draft=updated_draft,
+        candidates=[],
+    )

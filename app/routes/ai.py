@@ -18,6 +18,8 @@ from ..models import (
     AIPlanSnapshot,
     AIRefineCandidateRequest,
     AIRevisePlanRequest,
+    AIChatRequest,
+    AIChatResponse,
     Habit,
     User,
 )
@@ -32,6 +34,7 @@ from ..services.ai_pipeline import (
     process_intake_step,
     refine_habit_candidate,
     revise_habit_plan,
+    chat as ai_chat,
 )
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -421,3 +424,34 @@ def create_candidate(
         progressions=result.progressions,
         raw_plan=result.raw_plan,
     )
+
+
+# ---------------------------------------------------------------------------
+# New unified chat endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/chat", response_model=AIChatResponse)
+def chat_endpoint(
+    payload: AIChatRequest,
+    user: User = Depends(current_user),
+):
+    """
+    Single stateful chat turn. The client owns session state via `draft`.
+
+    Actions returned:
+      clarify  — assistant_message has the next question
+      generate — candidates list is populated with two habit variants
+      advise   — general habit-domain answer with soft pivot to creation
+      redirect — out-of-scope; assistant_message explains
+    """
+    try:
+        return ai_chat(
+            message=payload.message,
+            draft=payload.draft,
+        )
+    except AIPipelineConfigError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    except AIPipelineGenerationError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    except AIPipelineError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
