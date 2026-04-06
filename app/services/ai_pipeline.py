@@ -2687,8 +2687,10 @@ RULES
 - trigger_type: always "time"; trigger_value: "HH:MM" 24-hour format.
   If the draft contains trigger_value, use it exactly.
   Otherwise fall back to preferred_time (morning→07:00, afternoon→14:00, evening→20:00, flexible→07:00).
-- frequency_type: "daily" if daily/weekdays/weekends; "specific_days" for named days.
-- frequency_pattern: {"days": [...]} — only include for specific_days, else omit.
+- frequency_type: always "daily" (for daily/weekdays/weekends) or "specific_days" (for named days).
+- frequency_pattern: ALWAYS a dict with a "days" key — never null.
+  daily → {"days": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]}
+  specific_days → {"days": ["monday","wednesday","friday"]} (use the draft's schedule_days)
 
 RESPONSE FORMAT — valid JSON only:
 {
@@ -2708,7 +2710,7 @@ RESPONSE FORMAT — valid JSON only:
         "trigger_type": "time",
         "trigger_value": "07:00",
         "frequency_type": "daily",
-        "frequency_pattern": null,
+        "frequency_pattern": {"days": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]},
         "requires_quantity": false,
         "quantity_unit": null,
         "allows_notes": true,
@@ -2829,6 +2831,12 @@ def _parse_candidates(raw_candidates: List[dict]) -> List:
     for c in raw_candidates:
         try:
             payload_dict = c.get("habit_payload", {})
+            # Ensure frequency_pattern is always a dict — AI sometimes returns null
+            if not payload_dict.get("frequency_pattern"):
+                payload_dict = dict(payload_dict)
+                payload_dict["frequency_pattern"] = {
+                    "days": list(ORDERED_DAYS)
+                }
             habit_payload = HabitCreate(**payload_dict)
             results.append(AIChatCandidate(
                 title=c.get("title", "Habit Plan"),

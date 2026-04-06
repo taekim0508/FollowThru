@@ -341,6 +341,36 @@ class TestParseCandidates:
         assert results[0].habit_payload.name == "Deep Work"
         assert results[0].habit_payload.category == "study"
 
+    def test_null_frequency_pattern_fallback(self):
+        """Regression: AI returns frequency_pattern=null for daily habits — must not drop candidate."""
+        payload_no_freq = {
+            "name": "Daily Run",
+            "category": "fitness",
+            "description": "Run every day",
+            "trigger_type": "time",
+            "trigger_value": "07:00",
+            "frequency_type": "daily",
+            "frequency_pattern": None,  # AI bug — returns null instead of dict
+            "requires_quantity": False,
+            "allows_notes": True,
+        }
+        raw = [{
+            "title": "Daily Run",
+            "category": "fitness",
+            "description": "Run every day",
+            "suggested_schedule": "daily",
+            "duration_minutes": 30,
+            "rationale": "Good cardio",
+            "variant": "balanced",
+            "habit_payload": payload_no_freq,
+            "progressions": [],
+        }]
+        results = _parse_candidates(raw)
+        assert len(results) == 1
+        assert results[0].habit_payload.frequency_pattern == {
+            "days": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        }
+
 
 # ---------------------------------------------------------------------------
 # _coerce_schedule_days — the bug that caused the 500
