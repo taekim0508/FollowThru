@@ -310,7 +310,14 @@ struct AIChatView: View {
 
             HStack(spacing: 10) {
                 metaPill(icon: "calendar", text: formattedSchedule(candidate.suggestedSchedule), accent: accent)
-                metaPill(icon: "timer", text: formatDuration(candidate.durationMinutes), accent: accent)
+                if let target = candidate.habitPayload.targetValue,
+                   let unit = candidate.habitPayload.quantityUnit {
+                    // Tracked/cumulative habit — show the quantity goal, not a duration
+                    metaPill(icon: "checkmark.circle", text: "\(formatTarget(target)) \(unit)", accent: accent)
+                } else if candidate.durationMinutes > 0 {
+                    // Session habit — show duration
+                    metaPill(icon: "timer", text: formatDuration(candidate.durationMinutes), accent: accent)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -384,6 +391,10 @@ struct AIChatView: View {
         case "sleep":    return "moon"
         default:         return "star"
         }
+    }
+
+    private func formatTarget(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
 
     private func formatDuration(_ minutes: Int) -> String {

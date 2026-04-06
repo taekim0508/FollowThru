@@ -2562,14 +2562,12 @@ SESSION habits (fitness, study, reading, timed wellness like meditation/yoga):
   The user does a discrete block of activity. Fields needed: duration_minutes, schedule_days, trigger_value.
 
 CUMULATIVE DAILY habits (water intake, steps, pages read as a count, calories, etc.):
-  The user accumulates toward a daily target throughout the day — there is no single "session."
-  Fields needed: target_value + quantity_unit, schedule_days, trigger_value (reminder time).
-  DO NOT ask duration_minutes for cumulative habits — it does not apply.
-  DO NOT ask target_value/quantity_unit more than once. Once the user states their goal
-  (e.g. "2 liters", "8 glasses", "10,000 steps"), set target_value + quantity_unit and
-  never ask about the quantity in any other phrasing.
+  The user accumulates toward a daily quantity target throughout the day.
+  Fields needed: target_value + quantity_unit, tracking_mode, schedule_days, trigger_value.
+  DO NOT ask duration_minutes — it does not apply to cumulative habits.
+  DO NOT re-ask target_value/quantity_unit once stated.
 
-Detect cumulative habits from words like: "drink", "water", "liters", "glasses", "steps",
+Detect cumulative habits from: "drink", "water", "liters", "glasses", "steps",
 "walk X steps", "calories", "pages per day", "words per day".
 
 ━━━ FIELD INFERENCE POLICY ━━━
@@ -2598,27 +2596,34 @@ ASK IF NOT CLEARLY INFERABLE:
 
 ALWAYS ASK — never infer or assume:
 - schedule_days: always ask which specific days, even if frequency is inferred.
-    * For daily habits ask: "Which days of the week — every day, or do you take any days off?"
-    * For session habits, present a frequency suggestion: "For a beginner runner, 3 days a \
-      week is a solid start — which days work best for you?"
+    * For daily habits: "Which days — every day, or do you take any days off?"
+    * For session habits: suggest frequency based on experience level, then ask which days.
 - duration_minutes: ask only for SESSION habits if not stated. Skip for cumulative habits.
     Honor the user's stated duration exactly — no adjustment.
-- trigger_value (reminder time): always ask what time works for them.
-    For cumulative habits, frame it as a reminder: "Would you like a reminder time to \
-    help you stay on track — like a morning nudge or an afternoon check-in?"
-    Never assume a time.
+- tracking_mode (cumulative habits only): ask whether the user wants to log progress \
+  incrementally or just check it off at the end of the day.
+    Ask: "Would you like to log each [unit] as you go — like tapping off each glass —
+    or just mark it done at the end of the day when you've hit your goal?"
+    Extract into habit_type: "tracked" if they want to log; "binary" if they prefer \
+    checking off.
+- trigger_value (reminder time): always ask for a specific time.
+    For cumulative habits: "What time would you like a reminder nudge — like 8:00 AM \
+    or another time that works for you?"
+    For session habits: "What time works best for your [habit] session?"
+    If the user mentions a period (morning/afternoon/evening) without a time, ask: \
+    "Any particular time in the [morning/afternoon/evening]?"
+    Never assume a time — not even 8:00 AM.
 
 ━━━ CONVERSATION RULES ━━━
 - Ask ONE question at a time. Never list multiple questions.
 - NEVER re-ask a field that is already set in current_draft. Check current_draft before \
   every question. If target_value is set, do not ask about quantity in any form.
-- Keep language natural and habit-appropriate. Don't ask "how long do you want to dedicate \
-  to this habit" for something like drinking water or hitting a step count.
+- Keep language natural and habit-appropriate. Don't ask about duration for water or steps.
 - Priority for session habits:  goal_summary → category → experience_level (if needed) \
-  → duration_minutes → frequency + schedule_days → trigger_value
+  → duration_minutes → schedule_days → tracking_mode → trigger_value
 - Priority for cumulative habits: goal_summary → category → target_value + quantity_unit \
-  → schedule_days → trigger_value
-- Once all required fields are gathered, wrap up warmly. Do NOT generate the plan yourself.
+  → schedule_days → tracking_mode → trigger_value
+- Once all required fields are gathered, summarise warmly. Do NOT generate the plan yourself.
 
 ━━━ EXTRACTION RULES — put every recognised value in extracted{} immediately ━━━
 
@@ -2679,19 +2684,31 @@ _TIER2_SYSTEM_PROMPT = """\
 You are HabitFlow's habit planner. Given a complete habit intake draft, generate \
 exactly two habit variants: "balanced" (sustainable) and "ambitious" (challenging).
 
-RULES
-- Honor duration_minutes exactly as given — do NOT reduce or cap it.
-- Use category, frequency, schedule_days, experience_level to shape each plan.
-- Each variant must have a distinct duration_minutes and/or schedule that reflects \
-  the balanced vs ambitious difference.
+━━━ HABIT TYPE RULES — read carefully ━━━
+
+SESSION habits (fitness, study, reading, timed meditation/yoga — habit_type="binary"):
+- The user does a timed block of activity.
+- Balanced variant: use draft.duration_minutes exactly.
+- Ambitious variant: increase duration by 25-50% OR add more days.
+- duration_minutes > 0 in both variants.
+
+TRACKED / CUMULATIVE habits (water intake, steps, pages as a count — habit_type="tracked"):
+- The user works toward a daily quantity target. There is NO session duration.
+- duration_minutes MUST be 0 in BOTH variants — it does not apply.
+- Balanced variant: use exactly draft.target_value + draft.quantity_unit as the goal.
+- Ambitious variant: increase target_value by 20-25%, rounded to the nearest integer.
+  Example: 8 glasses balanced → 10 glasses ambitious.
+- habit_payload MUST include: habit_type="tracked", target_value=<number>, quantity_unit=<unit>.
+- requires_quantity: true for tracked habits.
+
+━━━ SHARED RULES ━━━
 - progression: 4 weeks, each week slightly increasing challenge.
-- trigger_type: always "time"; trigger_value: "HH:MM" 24-hour format.
-  If the draft contains trigger_value, use it exactly.
-  Otherwise fall back to preferred_time (morning→07:00, afternoon→14:00, evening→20:00, flexible→07:00).
-- frequency_type: always "daily" (for daily/weekdays/weekends) or "specific_days" (for named days).
-- frequency_pattern: ALWAYS a dict with a "days" key — never null.
+- trigger_type: always "time"; trigger_value: use draft.trigger_value exactly if present.
+  Otherwise use preferred_time (morning→08:00, afternoon→14:00, evening→20:00, flexible→08:00).
+- frequency_type: "daily" for daily/weekdays/weekends; "specific_days" for named days.
+- frequency_pattern: ALWAYS a dict with "days" key — never null.
   daily → {"days": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]}
-  specific_days → {"days": ["monday","wednesday","friday"]} (use the draft's schedule_days)
+  specific_days → {"days": ["monday","wednesday","friday"]} (use draft.schedule_days)
 
 RESPONSE FORMAT — valid JSON only:
 {
@@ -2700,8 +2717,8 @@ RESPONSE FORMAT — valid JSON only:
       "title": "...",
       "category": "fitness|study|wellness|reading|sleep",
       "description": "...",
-      "suggested_schedule": "...",
-      "duration_minutes": 60,
+      "suggested_schedule": "Daily",
+      "duration_minutes": 0,
       "rationale": "...",
       "variant": "balanced",
       "habit_payload": {
@@ -2709,11 +2726,13 @@ RESPONSE FORMAT — valid JSON only:
         "category": "...",
         "description": "...",
         "trigger_type": "time",
-        "trigger_value": "07:00",
+        "trigger_value": "08:00",
         "frequency_type": "daily",
         "frequency_pattern": {"days": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]},
-        "requires_quantity": false,
-        "quantity_unit": null,
+        "habit_type": "tracked",
+        "target_value": 8,
+        "requires_quantity": true,
+        "quantity_unit": "glasses",
         "allows_notes": true,
         "motivation_statement": null
       },
@@ -2866,6 +2885,13 @@ _WELLNESS_WATER_KEYWORDS = frozenset([
     "water", "drink", "hydrat", "cup", "liter", "litre", "fluid",
 ])
 
+# Maps time-of-day keywords → default HH:MM trigger_value
+_TIME_OF_DAY: List[tuple] = [
+    (["morning", "mornings", "early", "wake up", "wakeup", "breakfast", "a.m.", " am "], "08:00"),
+    (["afternoon", "midday", "noon", "lunch", "lunchtime"], "14:00"),
+    (["evening", "evenings", "night", "before bed", "bedtime", "p.m.", " pm "], "20:00"),
+]
+
 
 def _apply_rule_based_fallbacks(message: str, draft: AIIntakeDraft) -> AIIntakeDraft:
     """
@@ -2929,6 +2955,24 @@ def _apply_rule_based_fallbacks(message: str, draft: AIIntakeDraft) -> AIIntakeD
             if any(kw in lower for kw in freq_keywords):
                 data["frequency"] = freq_value
                 break
+
+    # --- schedule_days from frequency (when user said "everyday" / "daily") ---
+    if not data.get("schedule_days") and data.get("frequency") == "daily":
+        data["schedule_days"] = list(ORDERED_DAYS)
+
+    # --- trigger_value from time-of-day words ---
+    if not data.get("trigger_value"):
+        padded = f" {lower} "  # pad so word-boundary checks work
+        for keywords, hhmm in _TIME_OF_DAY:
+            if any(kw in padded for kw in keywords):
+                data["trigger_value"] = hhmm
+                break
+        # Derive from preferred_time if still not set
+        if not data.get("trigger_value") and draft.preferred_time:
+            pt_map = {"morning": "08:00", "afternoon": "14:00", "evening": "20:00"}
+            tv = pt_map.get(draft.preferred_time)
+            if tv:
+                data["trigger_value"] = tv
 
     return AIIntakeDraft(**data)
 
@@ -3014,6 +3058,25 @@ def chat(
 
     # --- Tier 2: generate when confident enough ---
     if confidence >= _CONFIDENCE_THRESHOLD:
+        # Gate: we need a specific reminder time before generating a plan.
+        # If the user mentioned a period ("morning") without an exact time, ask.
+        if updated_draft.trigger_value is None:
+            _habit_noun = (
+                updated_draft.goal_summary.split()[:3] if updated_draft.goal_summary
+                else ["this habit"]
+            )
+            _period = updated_draft.preferred_time or "day"
+            _period_q = (
+                f"What time works best for a reminder? "
+                f"For example, 8:00 AM, 2:00 PM, or another time that fits your routine."
+            )
+            return AIChatResponse(
+                action="clarify",
+                assistant_message=_period_q,
+                updated_draft=updated_draft,
+                candidates=[],
+            )
+
         tier2 = _tier2_call(updated_draft, model)
         raw_candidates = tier2.get("candidates", [])
         candidates = _parse_candidates(raw_candidates)

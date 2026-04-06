@@ -178,6 +178,10 @@ struct HabitCreateRequestDTO: Codable, Hashable {
     let triggerValue: String?
     let frequencyType: String
     let frequencyPattern: BackendFrequencyPattern?
+    // "binary" (checkbox) or "tracked" (numeric goal)
+    let habitType: String?
+    // For tracked habits — the daily target quantity and its unit
+    let targetValue: Double?
     let requiresQuantity: Bool
     let quantityUnit: String?
     let allowsNotes: Bool
