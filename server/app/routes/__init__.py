@@ -1,2 +1,1 @@
-from . import completions, habits
-
+from . import ai, auth, completions, debug, friends, habits

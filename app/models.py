@@ -307,8 +307,6 @@ class AICreateCandidateRequest(BaseModel):
     candidate: AIHabitCandidate
 
 
-# ===== NEW CHAT MODELS =====
-
 class AIChatRequest(BaseModel):
     """Single-turn chat request. Draft carries session state between turns."""
     message: str
@@ -325,7 +323,7 @@ class AIChatCandidate(BaseModel):
     rationale: str
     variant: str                        # "balanced" | "ambitious"
     habit_payload: HabitCreate
-    progressions: List[dict]
+    progressions: List[dict] = PydanticField(default_factory=list)
 
 
 class AIChatResponse(BaseModel):
