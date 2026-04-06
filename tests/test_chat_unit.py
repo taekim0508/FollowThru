@@ -107,6 +107,56 @@ class TestComputeConfidence:
     def test_returns_float(self):
         assert isinstance(_compute_confidence(EMPTY_DRAFT), float)
 
+    # --- Tracked / cumulative habit behaviour ---
+
+    def test_tracked_habit_target_value_fills_duration_slot(self):
+        """target_value + experience_level freebie = 0.15 + 0.10 = 0.25 for tracked habits."""
+        d = AIIntakeDraft(habit_type="tracked", target_value=2.0)
+        assert _compute_confidence(d) == pytest.approx(0.25)
+
+    def test_tracked_habit_experience_level_free(self):
+        """experience_level is not required for tracked habits — weight awarded automatically."""
+        d = AIIntakeDraft(habit_type="tracked")
+        assert _compute_confidence(d) == pytest.approx(0.10)
+
+    def test_tracked_habit_caps_at_one_without_session_fields(self):
+        """A complete water habit draft (no duration, no experience_level) reaches 1.0."""
+        d = AIIntakeDraft(
+            habit_type="tracked",
+            goal_summary="Drink 2 litres of water daily",
+            category="wellness",
+            frequency="daily",
+            target_value=2.0,
+            quantity_unit="liters",
+            schedule_days=["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+        )
+        assert _compute_confidence(d) == pytest.approx(1.0)
+
+    def test_tracked_habit_meets_threshold_without_duration_or_experience(self):
+        """Water habit should cross 0.8 and trigger Tier 2."""
+        d = AIIntakeDraft(
+            habit_type="tracked",
+            goal_summary="Drink 9 glasses of water a day",
+            category="wellness",
+            frequency="daily",
+            target_value=9.0,
+            quantity_unit="glasses",
+            schedule_days=["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+        )
+        assert _compute_confidence(d) >= _CONFIDENCE_THRESHOLD
+
+    def test_session_habit_still_requires_duration(self):
+        """A binary/session habit without duration_minutes should not get that weight."""
+        d = AIIntakeDraft(
+            habit_type="binary",
+            goal_summary="Run in the morning",
+            category="fitness",
+            frequency="specific_days",
+        )
+        score = _compute_confidence(d)
+        # goal(0.25) + category(0.20) + frequency(0.20) = 0.65, no duration credit
+        assert score == pytest.approx(0.65)
+
 
 # ---------------------------------------------------------------------------
 # _is_clearly_offtopic
