@@ -288,6 +288,38 @@ extension AIPlanPreview {
     }
 }
 
+// MARK: - Unified Chat DTOs
+
+struct AIChatRequestDTO: Codable {
+    let message: String
+    let draft: AIIntakeDraftDTO
+}
+
+struct AIChatCandidateDTO: Codable, Identifiable {
+    let id = UUID()
+    let title: String
+    let category: String
+    let description: String
+    let suggestedSchedule: String
+    let durationMinutes: Int
+    let rationale: String
+    let variant: String                 // "balanced" | "ambitious"
+    let habitPayload: HabitCreateRequestDTO
+    let progressions: [AIProgressionDTO]
+
+    private enum CodingKeys: String, CodingKey {
+        case title, category, description, suggestedSchedule
+        case durationMinutes, rationale, variant, habitPayload, progressions
+    }
+}
+
+struct AIChatResponseDTO: Decodable {
+    let action: String                  // "clarify" | "generate" | "advise" | "redirect"
+    let assistantMessage: String
+    let updatedDraft: AIIntakeDraftDTO
+    let candidates: [AIChatCandidateDTO]
+}
+
 // MARK: - BackendHabitMapper (AI-relevant utilities only)
 
 enum BackendHabitMapper {

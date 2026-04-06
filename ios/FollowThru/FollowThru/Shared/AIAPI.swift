@@ -99,4 +99,17 @@ enum AIAPI {
         }
         throw BackendAPI.decodeError(data, response)
     }
+
+    // MARK: - Unified chat endpoint
+
+    static func chat(_ payload: AIChatRequestDTO) async throws -> AIChatResponseDTO {
+        let body = try BackendAPI.encoder().encode(payload)
+        let request = try BackendAPI.request(path: "/api/ai/chat", method: "POST", body: body)
+        let (data, response) = try await BackendAPI.perform(request)
+
+        if response.statusCode == 200 {
+            return try BackendAPI.decodeResponse(AIChatResponseDTO.self, from: data)
+        }
+        throw BackendAPI.decodeError(data, response)
+    }
 }
