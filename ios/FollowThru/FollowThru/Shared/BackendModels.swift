@@ -74,6 +74,7 @@ struct AIIntakeDraftDTO: Codable, Hashable {
     var habitType: String          = "binary"   // "binary" | "tracked"
     var targetValue: Double?       = nil
     var quantityUnit: String?      = nil
+    var triggerValue: String?      = nil        // "HH:MM" extracted when user states a time
 }
 
 struct AIIntakeRequestDTO: Codable, Hashable {

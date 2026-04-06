@@ -255,6 +255,7 @@ class AIIntakeDraft(BaseModel):
     habit_type: str = "binary"                   # "binary" | "tracked"
     target_value: Optional[float] = None         # for tracked habits (e.g. 5.0 for "5km")
     quantity_unit: Optional[str] = None          # for tracked habits (e.g. "km", "pages")
+    trigger_value: Optional[str] = None          # "HH:MM" — extracted when user states a time
 
 
 class AIIntakeRequest(BaseModel):
