@@ -2508,15 +2508,32 @@ _HABIT_KEYWORDS = {
 
 
 def _compute_confidence(draft: AIIntakeDraft) -> float:
-    """Rule-based confidence from field coverage. Pure Python — no AI involved."""
+    """Rule-based confidence from field coverage. Pure Python — no AI involved.
+
+    Tracked/cumulative habits (water, steps, etc.) never get duration_minutes or
+    experience_level, so those slots are filled differently:
+      - duration_minutes: satisfied by target_value for tracked habits
+      - experience_level: not required for tracked habits — awarded automatically
+    """
+    is_tracked = draft.habit_type == "tracked"
     score = 0.0
     for field, weight in _CONFIDENCE_FIELDS:
-        value = getattr(draft, field, None)
         if field == "schedule_days":
-            if value:  # non-empty list
+            if getattr(draft, field, None):
                 score += weight
-        elif value is not None:
-            score += weight
+        elif field == "duration_minutes":
+            # For tracked habits target_value serves this role
+            if draft.duration_minutes is not None or (
+                is_tracked and draft.target_value is not None
+            ):
+                score += weight
+        elif field == "experience_level":
+            # Irrelevant for tracked habits — don't penalise for not having it
+            if is_tracked or getattr(draft, field, None) is not None:
+                score += weight
+        else:
+            if getattr(draft, field, None) is not None:
+                score += weight
     return round(score, 3)
 
 
