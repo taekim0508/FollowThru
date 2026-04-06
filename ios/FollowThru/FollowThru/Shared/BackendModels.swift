@@ -1,13 +1,13 @@
 import Foundation
 
+// MARK: - AI Experience / Preferred-time enums
+
 enum AIExperienceLevel: String, Codable, CaseIterable, Hashable {
     case beginner
     case intermediate
     case advanced
 
-    var displayName: String {
-        rawValue.capitalized
-    }
+    var displayName: String { rawValue.capitalized }
 }
 
 enum AIPreferredTime: String, Codable, CaseIterable, Hashable {
@@ -16,9 +16,7 @@ enum AIPreferredTime: String, Codable, CaseIterable, Hashable {
     case evening
     case flexible
 
-    var displayName: String {
-        rawValue.capitalized
-    }
+    var displayName: String { rawValue.capitalized }
 }
 
 struct AIRequestContext: Codable, Hashable {
@@ -26,6 +24,8 @@ struct AIRequestContext: Codable, Hashable {
     let availableTime: Int
     let preferredTime: AIPreferredTime
 }
+
+// MARK: - AI Conversation types
 
 enum AIConversationPhase: String, Hashable {
     case intake
@@ -40,7 +40,6 @@ struct AIConversationMessage: Identifiable, Hashable {
         case assistant
         case user
     }
-
     let id = UUID()
     let role: Role
     let text: String
@@ -51,17 +50,30 @@ struct AIConversationMessageDTO: Codable, Hashable {
     let content: String
 }
 
+extension AIConversationMessage {
+    func toDTO() -> AIConversationMessageDTO {
+        AIConversationMessageDTO(role: role, content: text)
+    }
+}
+
+// MARK: - Intake DTOs
+
 struct AIIntakeDraftDTO: Codable, Hashable {
-    var goalSummary: String? = nil
-    var habitDescription: String? = nil
-    var frequency: String? = nil
-    var scheduleText: String? = nil
-    var scheduleDays: [String] = []
-    var durationMinutes: Int? = nil
+    var goalSummary: String?       = nil
+    var habitDescription: String?  = nil
+    var frequency: String?         = nil
+    var scheduleText: String?      = nil
+    var scheduleDays: [String]     = []
+    var durationMinutes: Int?      = nil
     var experienceLevel: AIExperienceLevel? = nil
-    var category: HabitCategory? = nil
+    var category: String?          = nil  // free-form string; matches backend
     var preferredTime: AIPreferredTime = .flexible
-    var availableTime: Int = 15
+    var availableTime: Int         = 15
+    // Passively inferred — never explicitly asked
+    var motivationStatement: String? = nil
+    var habitType: String          = "binary"   // "binary" | "tracked"
+    var targetValue: Double?       = nil
+    var quantityUnit: String?      = nil
 }
 
 struct AIIntakeRequestDTO: Codable, Hashable {
@@ -80,9 +92,121 @@ struct AIIntakeResponseDTO: Decodable, Hashable {
     let needsClarification: Bool
 }
 
+// MARK: - Habit Proposal / Candidate DTOs (two-variant proposal flow)
+
+struct AIHabitProposalRequestDTO: Codable, Hashable {
+    let recentMessages: [AIConversationMessageDTO]
+    let latestUserMessage: String
+}
+
+struct AIHabitCandidateDTO: Codable, Hashable, Identifiable {
+    let id = UUID()
+    let title: String
+    let category: String          // "fitness" | "wellness" | "study" | "reading" | "sleep"
+    let description: String
+    let suggestedSchedule: String
+    let durationMinutes: Int
+    let rationale: String
+    let variant: String           // "balanced" | "ambitious"
+    let habitPayload: HabitCreateRequestDTO
+    let progressions: [AIProgressionDTO]
+
+    private enum CodingKeys: String, CodingKey {
+        case title, category, description, suggestedSchedule
+        case durationMinutes, rationale, variant, habitPayload, progressions
+    }
+}
+
+struct AIHabitProposalResponseDTO: Decodable, Hashable {
+    let success: Bool
+    let provider: String
+    let model: String
+    let action: String            // "clarify" | "propose" | "off_topic" | "sensitive"
+    let assistantMessage: String
+    let whatIHeard: String?
+    let candidates: [AIHabitCandidateDTO]
+    let needsClarification: Bool
+}
+
+struct AIRefineCandidateRequestDTO: Codable, Hashable {
+    let idea: String
+    let selectedCandidate: AIHabitCandidateDTO
+    let refinement: String
+    let recentMessages: [AIConversationMessageDTO]
+}
+
+struct AIRefineCandidateResponseDTO: Decodable, Hashable {
+    let success: Bool
+    let provider: String
+    let model: String
+    let assistantMessage: String
+    let candidate: AIHabitCandidateDTO
+}
+
+struct AICreateCandidateRequestDTO: Codable, Hashable {
+    let candidate: AIHabitCandidateDTO
+}
+
+// MARK: - Generate / Plan DTOs
+
+struct AIGenerateRequestDTO: Codable, Hashable {
+    let userGoal: String
+    let category: String   // "fitness" | "study" | "wellness" | "reading" | "sleep"
+    let context: AIRequestContext?
+}
+
 struct AIGenerateFromDraftRequestDTO: Codable, Hashable {
     let draft: AIIntakeDraftDTO
 }
+
+struct AIProgressionDTO: Codable, Hashable {
+    let week: Int
+    let description: String
+}
+
+// mirrors backend FrequencyPattern {"days": [...]}
+struct BackendFrequencyPattern: Codable, Hashable {
+    let days: [String]
+}
+
+struct HabitCreateRequestDTO: Codable, Hashable {
+    let name: String
+    let category: String
+    let description: String
+    let triggerType: String
+    let triggerValue: String
+    let frequencyType: String
+    let frequencyPattern: BackendFrequencyPattern?
+    let requiresQuantity: Bool
+    let quantityUnit: String?
+    let allowsNotes: Bool
+    let motivationStatement: String?
+}
+
+struct AIPlanResponseDTO: Decodable, Hashable {
+    let success: Bool
+    let provider: String
+    let model: String
+    let habitPayload: HabitCreateRequestDTO
+    let progressions: [AIProgressionDTO]
+}
+
+// The habit field in the create response — only fields we need after creation.
+struct AICreatedHabitDTO: Decodable, Hashable {
+    let id: Int
+    let name: String
+}
+
+struct AICreateHabitResponseDTO: Decodable, Hashable {
+    let success: Bool
+    let provider: String
+    let model: String
+    let habit: AICreatedHabitDTO
+    let habitPayload: HabitCreateRequestDTO
+    let progressions: [AIProgressionDTO]
+}
+
+// MARK: - Revise Plan DTOs
 
 struct AIPlanSnapshotDTO: Codable, Hashable {
     let habitPayload: HabitCreateRequestDTO
@@ -107,99 +231,19 @@ struct AIRevisePlanResponseDTO: Decodable, Hashable {
     let success: Bool
     let provider: String
     let model: String
-    let action: String
+    let action: String  // "plan_tweak" | "reopen_intake"
     let planTweak: AIPlanPayloadResponseDTO?
     let reopenIntake: AIIntakeResponseDTO?
 }
 
-struct AIGenerateRequestDTO: Codable, Hashable {
-    let userGoal: String
-    let category: HabitCategory
-    let context: AIRequestContext?
-}
-
-struct BackendFrequencyPattern: Codable, Hashable {
-    let days: [String]
-}
-
-struct HabitCreateRequestDTO: Codable, Hashable {
-    let name: String
-    let category: HabitCategory
-    let description: String
-    let triggerType: String
-    let triggerValue: String
-    let frequencyType: String
-    let frequencyPattern: BackendFrequencyPattern?
-    let requiresQuantity: Bool
-    let quantityUnit: String?
-    let allowsNotes: Bool
-    let motivationStatement: String?
-}
-
-struct BackendHabit: Decodable, Identifiable, Hashable {
-    let id: Int
-    let userId: Int
-    let name: String
-    let category: HabitCategory
-    let description: String
-    let triggerType: String
-    let triggerValue: String
-    let frequencyType: String
-    let frequencyPattern: BackendFrequencyPattern?
-    let requiresQuantity: Bool
-    let quantityUnit: String?
-    let allowsNotes: Bool
-    let motivationStatement: String?
-    let status: String
-    let createdAt: String
-    let startedAt: String?
-    let updatedAt: String?
-}
-
-struct CompletionCreateRequestDTO: Codable, Hashable {
-    let completedDate: String
-    let quantityValue: Double?
-    let note: String?
-}
-
-struct BackendCompletion: Decodable, Identifiable, Hashable {
-    let id: Int
-    let habitId: Int
-    let userId: Int
-    let completedDate: String
-    let completedAt: String
-    let quantityValue: Double?
-    let note: String?
-}
-
-struct AIProgressionDTO: Codable, Hashable {
-    let week: Int
-    let description: String
-}
-
-struct AIPlanResponseDTO: Decodable, Hashable {
-    let success: Bool
-    let provider: String
-    let model: String
-    let habitPayload: HabitCreateRequestDTO
-    let progressions: [AIProgressionDTO]
-}
-
-struct AICreateHabitResponseDTO: Decodable, Hashable {
-    let success: Bool
-    let provider: String
-    let model: String
-    let habit: BackendHabit
-    let habitPayload: HabitCreateRequestDTO
-    let progressions: [AIProgressionDTO]
-}
+// MARK: - App-level AI plan preview (not persisted, lives in AppState)
 
 struct AIPlanPreview: Identifiable, Hashable {
     let id = UUID()
     let provider: String
     let model: String
     let title: String
-    let category: HabitCategory
+    let category: String
     let description: String
     let triggerValue: String
     let frequencySummary: String
@@ -207,34 +251,7 @@ struct AIPlanPreview: Identifiable, Hashable {
     let habitPayload: HabitCreateRequestDTO
 }
 
-struct AppHabitDraft: Hashable {
-    let name: String
-    let description: String
-    let category: HabitCategory
-    let kpiType: KPIType
-    let scheduledDays: [Int]
-    let scheduledTime: Date?
-}
-
-extension AppHabitDraft {
-    func toCreateRequest() -> HabitCreateRequestDTO {
-        let normalizedDays = Array(Set(scheduledDays)).sorted()
-        let isDaily = normalizedDays.isEmpty || normalizedDays == Array(1...7)
-        return HabitCreateRequestDTO(
-            name: name,
-            category: category,
-            description: description,
-            triggerType: "time",
-            triggerValue: BackendHabitMapper.hhmmString(from: scheduledTime),
-            frequencyType: isDaily ? "daily" : "custom",
-            frequencyPattern: isDaily ? nil : BackendFrequencyPattern(days: normalizedDays.compactMap(BackendHabitMapper.backendDayName)),
-            requiresQuantity: kpiType != .checkbox,
-            quantityUnit: BackendHabitMapper.quantityUnit(for: kpiType),
-            allowsNotes: true,
-            motivationStatement: nil
-        )
-    }
-}
+// MARK: - Convenience extensions
 
 extension HabitCreateRequestDTO {
     func toAIPlanPreview(provider: String, model: String, progressions: [AIProgressionDTO]) -> AIPlanPreview {
@@ -245,16 +262,13 @@ extension HabitCreateRequestDTO {
             category: category,
             description: description,
             triggerValue: triggerValue,
-            frequencySummary: BackendHabitMapper.frequencySummary(frequencyType: frequencyType, pattern: frequencyPattern),
+            frequencySummary: BackendHabitMapper.frequencySummary(
+                frequencyType: frequencyType,
+                pattern: frequencyPattern
+            ),
             progressions: progressions,
             habitPayload: self
         )
-    }
-}
-
-extension AIConversationMessage {
-    func toDTO() -> AIConversationMessageDTO {
-        AIConversationMessageDTO(role: role, content: text)
     }
 }
 
@@ -270,91 +284,14 @@ extension AIPlanPayloadResponseDTO {
 
 extension AIPlanPreview {
     func toSnapshotDTO() -> AIPlanSnapshotDTO {
-        AIPlanSnapshotDTO(
-            habitPayload: habitPayload,
-            progressions: progressions
-        )
+        AIPlanSnapshotDTO(habitPayload: habitPayload, progressions: progressions)
     }
 }
 
-extension BackendHabit {
-    func toAppHabit(completions: [BackendCompletion] = []) -> Habit {
-        Habit(
-            id: String(id),
-            name: name,
-            category: category,
-            description: description,
-            kpiType: BackendHabitMapper.kpiType(requiresQuantity: requiresQuantity, quantityUnit: quantityUnit),
-            scheduledDays: BackendHabitMapper.scheduledDays(frequencyType: frequencyType, pattern: frequencyPattern),
-            scheduledTime: BackendHabitMapper.time(from: triggerValue),
-            streak: BackendHabitMapper.streak(for: completions),
-            createdAt: BackendHabitMapper.dateTime(from: createdAt) ?? Date()
-        )
-    }
-}
-
-extension BackendCompletion {
-    func toAppHabitLog() -> HabitLog {
-        HabitLog(
-            id: String(id),
-            habitId: String(habitId),
-            date: BackendHabitMapper.dateOnly(from: completedDate) ?? Date(),
-            completed: true,
-            value: quantityValue,
-            note: note
-        )
-    }
-}
+// MARK: - BackendHabitMapper (AI-relevant utilities only)
 
 enum BackendHabitMapper {
-    nonisolated static func kpiType(requiresQuantity: Bool, quantityUnit: String?) -> KPIType {
-        guard requiresQuantity else { return .checkbox }
-        if quantityUnit?.lowercased() == "minutes" {
-            return .duration
-        }
-        return .count
-    }
-
-    nonisolated static func quantityUnit(for kpiType: KPIType) -> String? {
-        switch kpiType {
-        case .checkbox:
-            return nil
-        case .duration:
-            return "minutes"
-        case .count:
-            return "count"
-        }
-    }
-
-    nonisolated static func scheduledDays(frequencyType: String, pattern: BackendFrequencyPattern?) -> [Int] {
-        if frequencyType.lowercased() == "daily" {
-            return []
-        }
-        return (pattern?.days ?? [])
-            .compactMap(weekdayNumber(for:))
-            .sorted()
-    }
-
-    nonisolated static func backendDayName(for day: Int) -> String? {
-        switch day {
-        case 1: return "sunday"
-        case 2: return "monday"
-        case 3: return "tuesday"
-        case 4: return "wednesday"
-        case 5: return "thursday"
-        case 6: return "friday"
-        case 7: return "saturday"
-        default: return nil
-        }
-    }
-
-    nonisolated static func hhmmString(from date: Date?) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date ?? defaultTime())
-    }
-
+    /// Parse "HH:MM" trigger value into a displayable Date.
     nonisolated static func time(from value: String) -> Date? {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -362,93 +299,13 @@ enum BackendHabitMapper {
         return formatter.date(from: value)
     }
 
-    nonisolated static func defaultTime() -> Date {
-        Calendar.current.date(from: DateComponents(hour: 7, minute: 0)) ?? Date()
-    }
-
-    nonisolated static func dateTime(from value: String?) -> Date? {
-        guard let value else { return nil }
-        for format in [
-            "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS",
-            "yyyy-MM-dd'T'HH:mm:ss",
-        ] {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = TimeZone.current
-            formatter.dateFormat = format
-            if let date = formatter.date(from: value) {
-                return date
-            }
-        }
-        return ISO8601DateFormatter().date(from: value)
-    }
-
-    nonisolated static func dateOnly(from value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: value)
-    }
-
-    nonisolated static func dateOnlyString(from date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
-    }
-
-    nonisolated static func streak(for completions: [BackendCompletion], today: Date = Date()) -> Int {
-        streak(for: completions.compactMap { dateOnly(from: $0.completedDate) }, today: today)
-    }
-
-    nonisolated static func streak(for completionDates: [Date], today: Date = Date()) -> Int {
-        let calendar = Calendar.current
-        let completionDays = Set(completionDates.map { calendar.startOfDay(for: $0) })
-        let todayStart = calendar.startOfDay(for: today)
-
-        let startDate: Date
-        if completionDays.contains(todayStart) {
-            startDate = todayStart
-        } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: todayStart), completionDays.contains(yesterday) {
-            startDate = yesterday
-        } else {
-            return 0
-        }
-
-        var streak = 0
-        var cursor: Date? = startDate
-        while let day = cursor, completionDays.contains(day) {
-            streak += 1
-            cursor = calendar.date(byAdding: .day, value: -1, to: day)
-        }
-        return streak
-    }
-
-    nonisolated static func frequencySummary(frequencyType: String, pattern: BackendFrequencyPattern?) -> String {
-        if frequencyType.lowercased() == "daily" {
-            return "Daily"
-        }
-
+    /// Human-readable frequency label for the plan preview card.
+    nonisolated static func frequencySummary(
+        frequencyType: String,
+        pattern: BackendFrequencyPattern?
+    ) -> String {
+        if frequencyType.lowercased() == "daily" { return "Daily" }
         let labels = (pattern?.days ?? []).map { $0.prefix(3).capitalized }
-        if labels.isEmpty {
-            return "Custom"
-        }
-        return labels.joined(separator: ", ")
-    }
-
-    private nonisolated static func weekdayNumber(for day: String) -> Int? {
-        switch day.lowercased() {
-        case "sunday": return 1
-        case "monday": return 2
-        case "tuesday": return 3
-        case "wednesday": return 4
-        case "thursday": return 5
-        case "friday": return 6
-        case "saturday": return 7
-        default: return nil
-        }
+        return labels.isEmpty ? "Custom" : labels.joined(separator: ", ")
     }
 }

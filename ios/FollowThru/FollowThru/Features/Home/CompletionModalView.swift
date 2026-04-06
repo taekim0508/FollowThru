@@ -9,7 +9,14 @@ struct CompletionModalView: View {
     @State private var note = ""
     @State private var showNotes = false
     @State private var showCelebration = false
-    @State private var isSubmitting = false
+    @State private var progressString = ""
+    @State private var isLoading = false
+
+    // pre-populate with existing progress if already logged today
+    private var existingProgress: String {
+        if let p = habit.todayProgress { return String(Int(p)) }
+        return ""
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -32,24 +39,29 @@ struct CompletionModalView: View {
                         .foregroundColor(Theme.textSecondary)
                         .multilineTextAlignment(.center)
                 }
-            }
-
-            Text("Did you complete this today?")
-                .font(.subheadline)
-                .foregroundColor(Theme.textSecondary)
-
-            AppButton("Yes, I did it ✓", variant: .primary) {
-                Task {
-                    await finish(completed: true)
+                // motivation — show below description if present
+                if let motivation = habit.motivationStatement, !motivation.isEmpty {
+                    Text("\(motivation)")
+                        .font(.caption)
+                        .foregroundColor(Theme.textSecondary)
+                        .italic()
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 2)
                 }
             }
 
-            // Add a note toggle
+            if habit.habitType == "binary" {
+                binaryUI
+            } else {
+                trackedUI
+            }
+
+            // notes toggle
             Button {
                 withAnimation { showNotes.toggle() }
             } label: {
                 HStack {
-                    Text("Add a note")
+                    Text(showNotes ? "Hide note" : "Add a note")
                         .font(.subheadline)
                         .foregroundColor(Theme.textSecondary)
                     Spacer()
@@ -67,43 +79,126 @@ struct CompletionModalView: View {
                     .transition(.opacity)
             }
 
-            HStack(spacing: 12) {
-                AppButton("Skip Today", variant: .secondary) {
-                    Task {
-                        await finish(completed: false)
-                    }
-                }
-                AppButton("Not Yet", variant: .secondary) { dismiss() }
-            }
-
-            if let error = appState.habitsError {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundColor(Theme.terracotta)
+            if isLoading {
+                ProgressView()
             }
 
             Spacer()
         }
         .padding(.horizontal, 24)
-        .disabled(isSubmitting)
+        .onAppear {
+            // pre-populate progress if already logged today
+            progressString = existingProgress
+        }
         .sheet(isPresented: $showCelebration) {
             CelebrationView()
                 .presentationDetents([.medium])
         }
     }
 
-    private func finish(completed: Bool) async {
-        isSubmitting = true
-        defer { isSubmitting = false }
+    // MARK: - Binary UI
 
-        if completed {
-            let success = await appState.markComplete(habit: habit, note: note.isEmpty ? nil : note)
-            guard success else { return }
+    private var binaryUI: some View {
+        VStack(spacing: 12) {
+            AppButton(
+                habit.todayComplete ? "Already done ✓" : "Yes, I did it ✓",
+                variant: .primary
+            ) {
+                guard !habit.todayComplete else { return }
+                complete()
+            }
+            .disabled(habit.todayComplete || isLoading)
+            .opacity(habit.todayComplete ? 0.6 : 1)
+
+            // only show if not already completed
+            if !habit.todayComplete {
+                AppButton("No I didn't", variant: .secondary) {
+                    dismiss()
+                }
+            }
         }
-        dismiss()
-        if completed {
+    }
+
+    // MARK: - Tracked UI
+
+    private var trackedUI: some View {
+        VStack(spacing: 12) {
+            // target hint
+            if let target = habit.targetValue {
+                let unit = habit.quantityUnit ?? ""
+                Text("Goal: \(Int(target)) \(unit)")
+                    .font(.subheadline)
+                    .foregroundColor(Theme.textSecondary)
+            }
+
+            // value input
+            HStack {
+                Image(systemName: habit.quantityUnit == "minutes" ? "clock" : "number")
+                    .foregroundColor(Theme.primary)
+                TextField("0", text: $progressString)
+                    .keyboardType(.decimalPad)
+                    .font(.title2).fontWeight(.semibold)
+                    .foregroundColor(Theme.primary)
+                if let unit = habit.quantityUnit {
+                    Text(unit)
+                        .foregroundColor(Theme.textSecondary)
+                        .fontWeight(.semibold)
+                }
+            }
+            .padding(14)
+            .background(Theme.white)
+            .cornerRadius(12)
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.lightGray))
+
+            // progress feedback
+            if let entered = Double(progressString), let target = habit.targetValue {
+                let met = entered >= target
+                let unit = habit.quantityUnit ?? ""
+                HStack(spacing: 4) {
+                    Image(systemName: met ? "checkmark.circle.fill" : "minus.circle")
+                        .foregroundColor(met ? Theme.sage : Theme.terracotta)
+                    Text(met ? "Goal reached!" : "\(Int(target - entered)) \(unit) to go")
+                        .font(.caption)
+                        .foregroundColor(met ? Theme.sage : Theme.terracotta)
+                }
+                .animation(.easeInOut, value: progressString)
+            }
+
+            AppButton("Log \(habit.quantityUnit ?? "progress")", variant: .primary) {
+                logProgress()
+            }
+            .disabled(progressString.isEmpty || Double(progressString) == nil || isLoading)
+            .opacity(progressString.isEmpty ? 0.5 : 1)
+        }
+    }
+
+    // MARK: - Actions
+
+    private func complete() {
+        isLoading = true
+        Task {
+            await appState.completeHabit(habit, note: note.isEmpty ? nil : note)
+            isLoading = false
+            dismiss()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 showCelebration = true
+            }
+        }
+    }
+
+    private func logProgress() {
+        guard let value = Double(progressString) else { return }
+        let wasComplete = habit.todayComplete
+        isLoading = true
+        Task {
+            await appState.logProgress(habit, progressValue: value, note: note.isEmpty ? nil : note)
+            isLoading = false
+            dismiss()
+            // only show celebration if this log crossed the completion threshold
+            if !wasComplete, value >= (habit.targetValue ?? 0) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    showCelebration = true
+                }
             }
         }
     }

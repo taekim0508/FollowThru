@@ -1,7 +1,7 @@
 from sqlmodel import SQLModel, Field, Relationship
 from datetime import datetime, date
-from typing import Optional, List
-from pydantic import BaseModel, EmailStr
+from typing import Optional, List, Literal
+from pydantic import BaseModel, EmailStr, Field as PydanticField
 from sqlalchemy import Column, JSON, UniqueConstraint, Index
 
 # ===== DATABASE MODELS (SQLModel - used for both DB and API responses) =====
@@ -18,27 +18,45 @@ class User(SQLModel, table=True):
     updated_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"onupdate": datetime.utcnow})
     
     # Relationships (not stored in DB, just for querying)
-    habits: List["Habit"] = Relationship(back_populates="user")
-    completions: List["Completion"] = Relationship(back_populates="user")
+    habits: List["Habit"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    completions: List["Completion"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
 
     # Friend requests
     sent_friend_requests: List["FriendRequest"] = Relationship(
         back_populates="requester",
-        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.requester_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[FriendRequest.requester_id]",
+            "cascade": "all, delete-orphan"
+        },
     )
     received_friend_requests: List["FriendRequest"] = Relationship(
         back_populates="receiver",
-        sa_relationship_kwargs={"foreign_keys": "[FriendRequest.receiver_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[FriendRequest.receiver_id]",
+            "cascade": "all, delete-orphan"
+        },
     )
 
     # Friendships (accepted friends)
     friendships_as_low: List["Friendship"] = Relationship(
         back_populates="user_low",
-        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_low_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[Friendship.user_low_id]",
+            "cascade": "all, delete-orphan"
+        },
     )
     friendships_as_high: List["Friendship"] = Relationship(
         back_populates="user_high",
-        sa_relationship_kwargs={"foreign_keys": "[Friendship.user_high_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[Friendship.user_high_id]",
+            "cascade": "all, delete-orphan"
+        },
     )
 
 class Habit(SQLModel, table=True):
@@ -52,7 +70,8 @@ class Habit(SQLModel, table=True):
     description: str
 
     trigger_type: str = Field(max_length=20, default="time")
-    trigger_value: str = Field(max_length=10)
+    # null = no reminder set, "HH:MM" = reminder time
+    trigger_value: Optional[str] = Field(default=None, max_length=10)
 
     frequency_type: str = Field(max_length=20)
     frequency_pattern: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
@@ -68,12 +87,25 @@ class Habit(SQLModel, table=True):
     motivation_statement: Optional[str] = None
     status: str = Field(default="active", max_length=20)
 
+    # new: streak tracking
+
+    # current_streak: number of consecutive scheduled days completed
+    current_streak: int = Field(default=0)
+    # max_streak: lifetime best streak — never resets
+    max_streak: int = Field(default=0)
+    # streak_last_updated: the completion date last counted toward streak
+    # used to determine if streak is still active or broken
+    streak_last_updated: Optional[date] = Field(default=None)
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     started_at: Optional[date] = None
     updated_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"onupdate": datetime.utcnow})
 
     user: Optional[User] = Relationship(back_populates="habits")
-    completions: List["Completion"] = Relationship(back_populates="habit")
+    completions: List["Completion"] = Relationship(
+        back_populates="habit",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
 
 
 class Completion(SQLModel, table=True):
@@ -128,17 +160,38 @@ class HabitCreate(BaseModel):
     name: str
     category: str
     description: str
-    trigger_type: str = "time"
-    trigger_value: str
-    frequency_type: str
-    frequency_pattern: Optional[dict] = None
 
-    habit_type: str = "binary"   # binary or tracked
+    # trigger_type: what initiates the habit reminder ("time" = time-based, "location" = geofence-based)
+    # trigger_value: the actual trigger value — for time-based habits this is "HH:MM" (e.g. "07:00")
+    trigger_type: str = "time"
+    # null = no reminder, "HH:MM" = reminder time (e.g. "07:00")
+    trigger_value: Optional[str] = None
+
+    # deprecated — kept for backwards compatibility with existing API callers, not used in logic
+    frequency_type: str = Field(default="custom", max_length=20)
+
+    # source of truth for scheduling — {"days": ["monday", "tuesday"...]}
+    # always present, always a full list of selected days (1-7 days). all 7 days = every day.
+    frequency_pattern: dict
+
+    # "binary" = checkbox (did it or not)
+    # "tracked" = numeric target (duration in minutes or count of something)
+    habit_type: str = "binary"
+
+    # numeric goal for tracked habits (e.g. 30 for "30 minutes", 10 for "10 reps")
+    # null for binary habits
     target_value: Optional[float] = None
 
-    requires_quantity: bool = False
+    # display label for target_value (e.g. "minutes", "pages", "reps")
+    # null for binary habits
     quantity_unit: Optional[str] = None
+
+    # deprecated — notes always allowed, kept for API compatibility
     allows_notes: bool = True
+
+    # deprecated — redundant with habit_type=="tracked", kept for API compatibility
+    requires_quantity: bool = False
+
     motivation_statement: Optional[str] = None
 
 
@@ -146,14 +199,23 @@ class HabitUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     trigger_value: Optional[str] = None
+
+    # deprecated — not used in logic, kept for API compatibility
     frequency_type: Optional[str] = None
+
+    # update the scheduled days — {"days": ["monday"...]}
     frequency_pattern: Optional[dict] = None
 
     habit_type: Optional[str] = None
     target_value: Optional[float] = None
     quantity_unit: Optional[str] = None
+
+    # deprecated — kept for API compatibility
     requires_quantity: Optional[bool] = None
 
+    # allow update of motivation statement and category
+    motivation_statement: Optional[str] = None
+    category: Optional[str] = None
     status: Optional[str] = None
 
 
@@ -168,6 +230,82 @@ class AIGenerateRequest(BaseModel):
     user_goal: str  # Natural language: "I want to pray except weekends"
     category: str  # fitness, study, wellness, reading, sleep
     context: Optional[dict] = None  # {"experience_level": "beginner", "available_time": 15}
+
+
+class AIChatMessage(BaseModel):
+    role: Literal["assistant", "user"]
+    content: str
+
+
+class AIIntakeDraft(BaseModel):
+    goal_summary: Optional[str] = None
+    habit_description: Optional[str] = None
+    frequency: Optional[str] = None
+    schedule_mode: Optional[str] = None
+    times_per_week: Optional[int] = None
+    schedule_text: Optional[str] = None
+    schedule_days: List[str] = PydanticField(default_factory=list)
+    duration_minutes: Optional[int] = None
+    experience_level: Optional[str] = None
+    category: Optional[str] = None
+    preferred_time: str = "flexible"
+    available_time: int = 15
+    # Passively inferred — never explicitly asked
+    motivation_statement: Optional[str] = None   # extracted from user's "why"
+    habit_type: str = "binary"                   # "binary" | "tracked"
+    target_value: Optional[float] = None         # for tracked habits (e.g. 5.0 for "5km")
+    quantity_unit: Optional[str] = None          # for tracked habits (e.g. "km", "pages")
+
+
+class AIIntakeRequest(BaseModel):
+    recent_messages: List[AIChatMessage] = []
+    current_draft: Optional[AIIntakeDraft] = None
+    latest_user_message: str
+
+
+class AIGenerateFromDraftRequest(BaseModel):
+    draft: AIIntakeDraft
+
+
+class AIPlanSnapshot(BaseModel):
+    habit_payload: HabitCreate
+    progressions: List[dict]
+
+
+class AIRevisePlanRequest(BaseModel):
+    draft: AIIntakeDraft
+    current_plan: AIPlanSnapshot
+    critique: str
+    recent_messages: List[AIChatMessage] = []
+
+
+class AIHabitCandidate(BaseModel):
+    title: str
+    category: str
+    description: str
+    suggested_schedule: str
+    duration_minutes: int
+    rationale: str
+    variant: str = "balanced"
+    habit_payload: HabitCreate
+    progressions: List[dict] = PydanticField(default_factory=list)
+
+
+class AIHabitProposalRequest(BaseModel):
+    recent_messages: List[AIChatMessage] = []
+    latest_user_message: str
+
+
+class AIRefineCandidateRequest(BaseModel):
+    idea: str
+    selected_candidate: AIHabitCandidate
+    refinement: str
+    recent_messages: List[AIChatMessage] = []
+
+
+class AICreateCandidateRequest(BaseModel):
+    candidate: AIHabitCandidate
+
 
 # ===== FRIENDS MODELS =====
 

@@ -19,5 +19,10 @@ def get_session():
         yield session
 
 def create_db_and_tables():
-    """Create all tables"""
+    """Create all tables.
+
+    Local import ensures all SQLModel table classes are registered with
+    metadata before create_all(), regardless of which module calls this.
+    """
+    from . import models  # noqa: F401
     SQLModel.metadata.create_all(engine)
