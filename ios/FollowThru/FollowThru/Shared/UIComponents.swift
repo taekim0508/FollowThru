@@ -102,11 +102,11 @@ struct HabitProgressBar: View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Theme.offWhite)
+                    .fill(Theme.lightGray)
                     .frame(height: 4)
 
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Theme.primary)
+                    .fill(Theme.sage)
                     .frame(width: max(0, geo.size.width * CGFloat(min(max(value, 0), 1))), height: 4)
                     .animation(.easeInOut, value: value)
             }
