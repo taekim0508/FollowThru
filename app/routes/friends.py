@@ -1,4 +1,4 @@
-# server/app/routes/friends.py
+# app/routes/friends.py
 from __future__ import annotations
 
 from datetime import datetime
