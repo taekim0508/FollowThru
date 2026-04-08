@@ -21,3 +21,4 @@ venv/
 # Local env files
 .env
 server/.env
+.claude/
