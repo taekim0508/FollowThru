@@ -74,6 +74,7 @@ struct AIIntakeDraftDTO: Codable, Hashable {
     var habitType: String          = "binary"   // "binary" | "tracked"
     var targetValue: Double?       = nil
     var quantityUnit: String?      = nil
+    var triggerValue: String?      = nil        // "HH:MM" extracted when user states a time
 }
 
 struct AIIntakeRequestDTO: Codable, Hashable {
@@ -174,9 +175,13 @@ struct HabitCreateRequestDTO: Codable, Hashable {
     let category: String
     let description: String
     let triggerType: String
-    let triggerValue: String
+    let triggerValue: String?
     let frequencyType: String
     let frequencyPattern: BackendFrequencyPattern?
+    // "binary" (checkbox) or "tracked" (numeric goal)
+    let habitType: String?
+    // For tracked habits — the daily target quantity and its unit
+    let targetValue: Double?
     let requiresQuantity: Bool
     let quantityUnit: String?
     let allowsNotes: Bool
@@ -245,7 +250,7 @@ struct AIPlanPreview: Identifiable, Hashable {
     let title: String
     let category: String
     let description: String
-    let triggerValue: String
+    let triggerValue: String?
     let frequencySummary: String
     let progressions: [AIProgressionDTO]
     let habitPayload: HabitCreateRequestDTO
@@ -286,6 +291,39 @@ extension AIPlanPreview {
     func toSnapshotDTO() -> AIPlanSnapshotDTO {
         AIPlanSnapshotDTO(habitPayload: habitPayload, progressions: progressions)
     }
+}
+
+// MARK: - Unified Chat DTOs
+
+struct AIChatRequestDTO: Codable {
+    let message: String
+    let draft: AIIntakeDraftDTO
+    let recentMessages: [AIConversationMessageDTO]
+}
+
+struct AIChatCandidateDTO: Codable, Identifiable {
+    let id = UUID()
+    let title: String
+    let category: String
+    let description: String
+    let suggestedSchedule: String
+    let durationMinutes: Int
+    let rationale: String
+    let variant: String                 // "balanced" | "ambitious"
+    let habitPayload: HabitCreateRequestDTO
+    let progressions: [AIProgressionDTO]
+
+    private enum CodingKeys: String, CodingKey {
+        case title, category, description, suggestedSchedule
+        case durationMinutes, rationale, variant, habitPayload, progressions
+    }
+}
+
+struct AIChatResponseDTO: Decodable {
+    let action: String                  // "clarify" | "generate" | "advise" | "redirect"
+    let assistantMessage: String
+    let updatedDraft: AIIntakeDraftDTO
+    let candidates: [AIChatCandidateDTO]
 }
 
 // MARK: - BackendHabitMapper (AI-relevant utilities only)

@@ -63,6 +63,7 @@ _TRACKED_PATTERNS: List[tuple] = [
     (re.compile(r"(\d+)\s*pages?", re.I),              1, "pages"),
     (re.compile(r"(\d+)\s*glasses?", re.I),            1, "glasses"),
     (re.compile(r"(\d+)\s*(?:cups?|liters?|litres?|oz)", re.I), 1, "glasses"),
+    (re.compile(r"(\d+)\s*steps?", re.I),               1, "steps"),
     (re.compile(r"(\d+)\s*reps?", re.I),               1, "reps"),
     (re.compile(r"(\d+)\s*push\s*ups?", re.I),         1, "reps"),
     (re.compile(r"(\d+)\s*sit\s*ups?", re.I),          1, "reps"),
@@ -1337,13 +1338,6 @@ def _combined_user_idea(recent_messages: Sequence[AIChatMessage], latest_user_me
     return " ".join(unique_parts)
 
 
-def _has_prior_clarification(recent_messages: Sequence[AIChatMessage]) -> bool:
-    return any(
-        message.role == "assistant" and "what kind of change" in message.content.lower()
-        for message in recent_messages[-6:]
-    )
-
-
 def _has_prior_experience_ask(recent_messages: Sequence[AIChatMessage]) -> bool:
     """Returns True if the assistant has already asked about experience level."""
     experience_ask_phrases = [
@@ -1504,16 +1498,6 @@ def _inferred_experience_from_idea(idea: str) -> str:
     if any(kw in lower for kw in ["lock in", "serious", "grind", "used to studying", "i study a lot"]):
         return "intermediate"
     return "beginner"
-
-
-def _default_duration_for_category(category: str) -> int:
-    return {
-        "fitness": 15,
-        "study": 20,
-        "wellness": 10,
-        "reading": 15,
-        "sleep": 20,
-    }.get(category, 15)
 
 
 def _proposal_variants(
@@ -2490,4 +2474,624 @@ def revise_habit_plan(
         provider=revised_plan.provider,
         model=revised_plan.model,
         plan_tweak=revised_plan,
+    )
+
+
+# =============================================================================
+# TWO-TIER CHAT ARCHITECTURE
+# =============================================================================
+
+# Fields required before Tier 2 fires (confidence gate).
+_CONFIDENCE_FIELDS: List[tuple] = [
+    # (field_name, weight)  — weights sum to 1.0
+    ("goal_summary", 0.25),
+    ("category", 0.20),
+    ("frequency", 0.20),
+    ("duration_minutes", 0.15),
+    ("experience_level", 0.10),
+    ("schedule_days", 0.10),  # non-empty list counts as present
+]
+_CONFIDENCE_THRESHOLD = 0.80
+
+# Cheap pre-filter keyword sets (no API call).
+_OFFTOPIC_KEYWORDS = {
+    "weather", "stock", "crypto", "bitcoin", "ethereum", "politics",
+    "election", "movie", "film", "music", "song", "recipe", "cook",
+    "dating", "relationship", "sports score", "football", "soccer",
+    "basketball", "baseball", "nba", "nfl", "mlb",
+}
+_HABIT_KEYWORDS = {
+    "habit", "routine", "goal", "workout", "exercise", "study", "sleep",
+    "read", "meditate", "run", "walk", "practice", "train", "gym",
+    "journal", "drink water", "stretch", "yoga", "wake up", "morning",
+    "evening", "daily", "weekly", "schedule", "remind",
+}
+
+
+def _compute_confidence(draft: AIIntakeDraft) -> float:
+    """Rule-based confidence from field coverage. Pure Python — no AI involved.
+
+    Tracked/cumulative habits (water, steps, etc.) never get duration_minutes or
+    experience_level, so those slots are filled differently:
+      - duration_minutes: satisfied by target_value for tracked habits
+      - experience_level: not required for tracked habits — awarded automatically
+    """
+    is_tracked = draft.habit_type == "tracked"
+    score = 0.0
+    for field, weight in _CONFIDENCE_FIELDS:
+        if field == "schedule_days":
+            if getattr(draft, field, None):
+                score += weight
+        elif field == "duration_minutes":
+            # For tracked habits target_value serves this role
+            if draft.duration_minutes is not None or (
+                is_tracked and draft.target_value is not None
+            ):
+                score += weight
+        elif field == "experience_level":
+            # Irrelevant for tracked habits — don't penalise for not having it
+            if is_tracked or getattr(draft, field, None) is not None:
+                score += weight
+        else:
+            if getattr(draft, field, None) is not None:
+                score += weight
+    return round(score, 3)
+
+
+def _is_clearly_offtopic(message: str) -> bool:
+    """Cheap keyword check. Returns True only when confidently off-topic."""
+    lower = message.lower()
+    # If the message mentions any habit-related term, it's probably in-scope.
+    if any(kw in lower for kw in _HABIT_KEYWORDS):
+        return False
+    return any(kw in lower for kw in _OFFTOPIC_KEYWORDS)
+
+
+_TIER1_SYSTEM_PROMPT = """\
+You are HabitFlow's habit coach. Your job is to gather what you need to build a \
+personalized habit plan through natural, fluid conversation — one question at a time.
+
+You extract structured fields from what the user says and decide whether to:
+- ask a clarifying question (action: "clarify")
+- answer a general habit-domain question and pivot back to creation (action: "advise")
+- politely redirect if clearly out-of-scope (action: "redirect")
+
+━━━ TWO HABIT TYPES — behave differently for each ━━━
+
+SESSION habits (fitness, study, reading, timed wellness like meditation/yoga):
+  The user does a discrete block of activity. Fields needed: duration_minutes, schedule_days, trigger_value.
+
+CUMULATIVE DAILY habits (water intake, steps, pages read as a count, calories, etc.):
+  The user accumulates toward a daily quantity target throughout the day.
+  Fields needed: target_value + quantity_unit, tracking_mode, schedule_days, trigger_value.
+  DO NOT ask duration_minutes — it does not apply to cumulative habits.
+  DO NOT re-ask target_value/quantity_unit once stated.
+
+Detect cumulative habits from: "drink", "water", "liters", "glasses", "steps",
+"walk X steps", "calories", "pages per day", "words per day".
+
+━━━ FIELD INFERENCE POLICY ━━━
+
+INFER SILENTLY — extract from context, never ask:
+- goal_summary: one-sentence description of what they want to do
+- category: fitness | study | wellness | reading | sleep — infer from their description
+- frequency: daily | weekly | specific_days
+    * Cumulative daily habits (water, steps) → always "daily"
+    * Beginner runner → specific_days (3x/week)
+    * Intermediate runner → specific_days (4-5x/week)
+    * Meditation/journaling → daily
+  Set frequency in extracted{}; confirm with the user only for non-daily habits.
+- motivation_statement: passively extract the user's "why" if mentioned
+- habit_type: "binary" by default; "tracked" if they mention a measurable quantity
+- target_value + quantity_unit: extract immediately when the user states a quantity.
+  Do not ask again once set.
+
+ASK IF NOT CLEARLY INFERABLE:
+- experience_level: beginner | intermediate | advanced
+    * Infer only when explicit: "third year student", "grad student", "phd", "masters",
+      "law school", "med school", "college senior", "just starting", "never done this",
+      "i've been doing this for years", "serious about it", "i study a lot"
+    * Skip entirely for cumulative habits (experience level is irrelevant for drinking water).
+    * If ambiguous for session habits, ask: "Are you new to [habit] or have you done it before?"
+
+ALWAYS ASK — never infer or assume:
+- schedule_days: always ask which specific days, even if frequency is inferred.
+    * For daily habits: "Which days — every day, or do you take any days off?"
+    * For session habits: suggest frequency based on experience level, then ask which days.
+- duration_minutes: ask only for SESSION habits if not stated. Skip for cumulative habits.
+    Honor the user's stated duration exactly — no adjustment.
+- tracking_mode (cumulative habits only): ask whether the user wants to log progress \
+  incrementally or just check it off at the end of the day.
+    Ask: "Would you like to log each [unit] as you go — like tapping off each glass —
+    or just mark it done at the end of the day when you've hit your goal?"
+    Extract into habit_type: "tracked" if they want to log; "binary" if they prefer \
+    checking off.
+- trigger_value (reminder time): always ask for a specific time.
+    For cumulative habits: "What time would you like a reminder nudge — like 8:00 AM \
+    or another time that works for you?"
+    For session habits: "What time works best for your [habit] session?"
+    If the user mentions a period (morning/afternoon/evening) without a time, ask: \
+    "Any particular time in the [morning/afternoon/evening]?"
+    Never assume a time — not even 8:00 AM.
+
+━━━ CONVERSATION RULES ━━━
+- Ask ONE question at a time. Never list multiple questions.
+- NEVER re-ask a field that is already set in current_draft. Check current_draft before \
+  every question. If target_value is set, do not ask about quantity in any form.
+- Keep language natural and habit-appropriate. Don't ask about duration for water or steps.
+- Priority for session habits:  goal_summary → category → experience_level (if needed) \
+  → duration_minutes → schedule_days → tracking_mode → trigger_value
+- Priority for cumulative habits: goal_summary → category → target_value + quantity_unit \
+  → schedule_days → tracking_mode → trigger_value
+- Once all required fields are gathered, summarise warmly. Do NOT generate the plan yourself.
+
+━━━ EXTRACTION RULES — put every recognised value in extracted{} immediately ━━━
+
+When the user mentions a quantity (e.g. "2 liters", "8 glasses", "10,000 steps"):
+  extracted must include ALL THREE: habit_type, target_value, quantity_unit
+  e.g. {"habit_type": "tracked", "target_value": 2.0, "quantity_unit": "liters"}
+
+When the user mentions specific days or a schedule:
+  extracted must include schedule_days as a list of lowercase day names
+  "every day except Sundays" → {"schedule_days": ["monday","tuesday","wednesday","thursday","friday","saturday"]}
+  "weekdays" → {"schedule_days": ["monday","tuesday","wednesday","thursday","friday"]}
+
+When the user mentions a specific time (e.g. "8am", "8:00 am", "6:30 in the morning"):
+  extracted must include trigger_value in 24-hour HH:MM format
+  "8:00 am" → {"trigger_value": "08:00"}
+  "6:30 in the morning" → {"trigger_value": "06:30"}
+  Also extract preferred_time: "morning" | "afternoon" | "evening"
+
+Never leave extracted{} empty when the user's message contains any of the above.
+If nothing new was said, extracted{} may be omitted or {}.
+
+RESPONSE FORMAT — always return valid JSON:
+{
+  "action": "clarify" | "advise" | "redirect",
+  "assistant_message": "...",
+  "extracted": {
+    // every field recognised this turn — do not omit fields the user just stated
+  }
+}
+"""
+
+
+def _tier1_call(
+    message: str,
+    draft: AIIntakeDraft,
+    recent_messages: List[AIChatMessage],
+    model: str,
+) -> dict:
+    """Tier 1: extract fields + determine intent. Returns raw JSON dict."""
+    draft_dict = {k: v for k, v in draft.model_dump().items() if v is not None and v != [] and v != "flexible" and v != 15}
+
+    messages: List[Dict[str, str]] = [{"role": "system", "content": _TIER1_SYSTEM_PROMPT}]
+
+    # Include recent context (capped)
+    for m in recent_messages[-MAX_RECENT_MESSAGES:]:
+        messages.append({"role": m.role, "content": m.content})
+
+    user_payload = {
+        "user_message": message,
+        "current_draft": draft_dict,
+    }
+    messages.append({"role": "user", "content": json.dumps(user_payload)})
+
+    return _call_openai_messages_for_json(messages, model)
+
+
+_TIER2_SYSTEM_PROMPT = """\
+You are HabitFlow's habit planner. Given a complete habit intake draft, generate \
+exactly two habit variants: "balanced" (sustainable) and "ambitious" (challenging).
+
+━━━ HABIT TYPE RULES — read carefully ━━━
+
+SESSION habits (fitness, study, reading, timed meditation/yoga — habit_type="binary"):
+- The user does a timed block of activity.
+- Balanced variant: use draft.duration_minutes exactly.
+- Ambitious variant: increase duration by 25-50% OR add more days.
+- duration_minutes > 0 in both variants.
+
+TRACKED / CUMULATIVE habits (water intake, steps, pages as a count — habit_type="tracked"):
+- The user works toward a daily quantity target. There is NO session duration.
+- duration_minutes MUST be 0 in BOTH variants — it does not apply.
+- Balanced variant: use exactly draft.target_value + draft.quantity_unit as the goal.
+- Ambitious variant: increase target_value by 20-25%, rounded to the nearest integer.
+  Example: 8 glasses balanced → 10 glasses ambitious.
+- habit_payload MUST include: habit_type="tracked", target_value=<number>, quantity_unit=<unit>.
+- requires_quantity: true for tracked habits.
+
+━━━ SHARED RULES ━━━
+- progression: 4 weeks, each week slightly increasing challenge.
+- trigger_type: always "time"; trigger_value: use draft.trigger_value exactly if present.
+  Otherwise use preferred_time (morning→08:00, afternoon→14:00, evening→20:00, flexible→08:00).
+- frequency_type: "daily" for daily/weekdays/weekends; "specific_days" for named days.
+- frequency_pattern: ALWAYS a dict with "days" key — never null.
+  daily → {"days": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]}
+  specific_days → {"days": ["monday","wednesday","friday"]} (use draft.schedule_days)
+
+RESPONSE FORMAT — valid JSON only:
+{
+  "candidates": [
+    {
+      "title": "...",
+      "category": "fitness|study|wellness|reading|sleep",
+      "description": "...",
+      "suggested_schedule": "Daily",
+      "duration_minutes": 0,
+      "rationale": "...",
+      "variant": "balanced",
+      "habit_payload": {
+        "name": "...",
+        "category": "...",
+        "description": "...",
+        "trigger_type": "time",
+        "trigger_value": "08:00",
+        "frequency_type": "daily",
+        "frequency_pattern": {"days": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]},
+        "habit_type": "tracked",
+        "target_value": 8,
+        "requires_quantity": true,
+        "quantity_unit": "glasses",
+        "allows_notes": true,
+        "motivation_statement": null
+      },
+      "progressions": [
+        {"week": 1, "description": "..."},
+        {"week": 2, "description": "..."},
+        {"week": 3, "description": "..."},
+        {"week": 4, "description": "..."}
+      ]
+    },
+    { "variant": "ambitious", ... }
+  ],
+  "summary_message": "Here are two plans I put together for you:"
+}
+"""
+
+
+def _tier2_call(draft: AIIntakeDraft, model: str) -> dict:
+    """Tier 2: generate both variants from a confident draft. Returns raw JSON dict."""
+    messages: List[Dict[str, str]] = [
+        {"role": "system", "content": _TIER2_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(draft.model_dump())},
+    ]
+    return _call_openai_messages_for_json(messages, model)
+
+
+_DAY_ALIASES: Dict[str, str] = {
+    "mon": "monday", "tue": "tuesday", "tues": "tuesday",
+    "wed": "wednesday", "thu": "thursday", "thur": "thursday", "thurs": "thursday",
+    "fri": "friday", "sat": "saturday", "sun": "sunday",
+}
+
+
+def _coerce_schedule_days(value: object) -> List[str]:
+    """Normalize schedule_days to a list of lowercase day names regardless of AI format.
+
+    Handles:
+      - Already a list: ["Monday", "Wednesday"] → ["monday", "wednesday"]
+      - Comma/slash separated string: "Mon, Wed, Fri" → ["monday", "wednesday", "friday"]
+      - Range string: "Monday through Saturday" → ["monday"..."saturday"]
+      - Plain prose: "weekdays" → ["monday","tuesday","wednesday","thursday","friday"]
+    """
+    if isinstance(value, list):
+        result = []
+        for item in value:
+            day = str(item).strip().lower()
+            day = _DAY_ALIASES.get(day, day)
+            if day in VALID_DAYS:
+                result.append(day)
+        return result
+
+    if not isinstance(value, str):
+        return []
+
+    lower = value.strip().lower()
+
+    # Shorthand expansions
+    if lower in ("weekdays", "weekday", "mon-fri", "mon–fri"):
+        return ["monday", "tuesday", "wednesday", "thursday", "friday"]
+    if lower in ("weekends", "weekend", "sat-sun", "sat/sun"):
+        return ["saturday", "sunday"]
+    if lower in ("daily", "every day", "all week", "all days"):
+        return list(ORDERED_DAYS)
+
+    # "X through Y" / "X to Y" range
+    for sep in (" through ", " to ", "-", "–"):
+        if sep in lower:
+            parts = lower.split(sep, 1)
+            start = parts[0].strip()
+            end = parts[1].strip()
+            start = _DAY_ALIASES.get(start, start)
+            end = _DAY_ALIASES.get(end, end)
+            if start in ORDERED_DAYS and end in ORDERED_DAYS:
+                si, ei = ORDERED_DAYS.index(start), ORDERED_DAYS.index(end)
+                if si <= ei:
+                    return ORDERED_DAYS[si: ei + 1]
+
+    # Comma / slash / space separated list
+    import re as _re
+    tokens = _re.split(r"[,/\s]+", lower)
+    result = []
+    for token in tokens:
+        token = token.strip().rstrip(".")
+        token = _DAY_ALIASES.get(token, token)
+        if token in VALID_DAYS:
+            result.append(token)
+    return result
+
+
+def _merge_extracted(draft: AIIntakeDraft, extracted: dict) -> AIIntakeDraft:
+    """Merge fields extracted by Tier 1 into the current draft."""
+    data = draft.model_dump()
+    allowed = {
+        "goal_summary", "habit_description", "frequency", "schedule_mode",
+        "schedule_days", "duration_minutes", "experience_level", "category",
+        "preferred_time", "available_time", "motivation_statement",
+        "habit_type", "target_value", "quantity_unit", "trigger_value",
+    }
+    for key, val in extracted.items():
+        if key not in allowed or val is None:
+            continue
+        if key == "schedule_days":
+            coerced = _coerce_schedule_days(val)
+            if coerced:  # only update if we got something valid
+                data[key] = coerced
+        else:
+            data[key] = val
+    return AIIntakeDraft(**data)
+
+
+def _parse_candidates(raw_candidates: List[dict]) -> List:
+    """Parse Tier 2 candidate dicts into AIChatCandidate models (imported lazily)."""
+    from ..models import AIChatCandidate
+
+    results = []
+    for c in raw_candidates:
+        try:
+            payload_dict = c.get("habit_payload", {})
+            # Ensure frequency_pattern is always a dict — AI sometimes returns null
+            if not payload_dict.get("frequency_pattern"):
+                payload_dict = dict(payload_dict)
+                payload_dict["frequency_pattern"] = {
+                    "days": list(ORDERED_DAYS)
+                }
+            habit_payload = HabitCreate(**payload_dict)
+            results.append(AIChatCandidate(
+                title=c.get("title", "Habit Plan"),
+                category=c.get("category", "wellness"),
+                description=c.get("description", ""),
+                suggested_schedule=c.get("suggested_schedule", ""),
+                duration_minutes=int(c.get("duration_minutes", 30)),
+                rationale=c.get("rationale", ""),
+                variant=c.get("variant", "balanced"),
+                habit_payload=habit_payload,
+                progressions=c.get("progressions", []),
+            ))
+        except Exception:
+            continue
+    return results
+
+
+_FREQUENCY_KEYWORDS: List[tuple] = [
+    # (keywords, frequency value)
+    (["every day", "everyday", "daily", "each day", "7 days"], "daily"),
+    (["weekday", "weekdays", "mon-fri", "monday through friday"], "weekdays"),
+    (["weekend", "weekends", "saturday and sunday"], "weekends"),
+]
+
+_WELLNESS_WATER_KEYWORDS = frozenset([
+    "water", "drink", "hydrat", "cup", "liter", "litre", "fluid",
+])
+
+# Maps time-of-day keywords → default HH:MM trigger_value
+_TIME_OF_DAY: List[tuple] = [
+    (["morning", "mornings", "early", "wake up", "wakeup", "breakfast", "a.m.", " am "], "08:00"),
+    (["afternoon", "midday", "noon", "lunch", "lunchtime"], "14:00"),
+    (["evening", "evenings", "night", "before bed", "bedtime", "p.m.", " pm "], "20:00"),
+]
+
+
+def _apply_rule_based_fallbacks(message: str, draft: AIIntakeDraft) -> AIIntakeDraft:
+    """
+    Apply deterministic rule-based extraction as a safety net after Tier 1.
+
+    The AI (GPT-4o-mini) sometimes returns action='advise' for clear habit-
+    creation intent, and omits goal_summary / category / frequency / habit_type
+    from extracted{}. This function fills all of those gaps from the user's
+    message without an extra API call.
+
+    Only writes fields that are still None / default — never overwrites
+    something the AI extracted correctly.
+    """
+    data = draft.model_dump()
+    lower = message.lower()
+    all_text = lower  # may extend below
+
+    # --- habit_type / target_value / quantity_unit ---
+    if data.get("habit_type", "binary") == "binary":
+        texts_to_check = [message]
+        if draft.goal_summary:
+            texts_to_check.append(draft.goal_summary)
+        for text in texts_to_check:
+            inferred_type, inferred_target, inferred_unit = _infer_habit_type_from_text(text)
+            if inferred_type == "tracked":
+                data["habit_type"] = "tracked"
+                if data.get("target_value") is None and inferred_target is not None:
+                    data["target_value"] = inferred_target
+                if data.get("quantity_unit") is None and inferred_unit is not None:
+                    data["quantity_unit"] = inferred_unit
+                break
+
+    # --- category ---
+    if not data.get("category"):
+        # Water / hydration → wellness (not in _HABIT_KEYWORD_MAP)
+        if any(kw in lower for kw in _WELLNESS_WATER_KEYWORDS):
+            data["category"] = "wellness"
+        else:
+            for cat, keywords in _HABIT_KEYWORD_MAP.items():
+                if any(kw in lower for kw in keywords):
+                    data["category"] = cat
+                    break
+            # fallback: check goal_summary
+            if not data.get("category") and draft.goal_summary:
+                gs_lower = draft.goal_summary.lower()
+                if any(kw in gs_lower for kw in _WELLNESS_WATER_KEYWORDS):
+                    data["category"] = "wellness"
+                else:
+                    for cat, keywords in _HABIT_KEYWORD_MAP.items():
+                        if any(kw in gs_lower for kw in keywords):
+                            data["category"] = cat
+                            break
+
+    # --- goal_summary (use user's message as-is when AI didn't extract one) ---
+    if not data.get("goal_summary") and message.strip():
+        data["goal_summary"] = message.strip()[:200]
+
+    # --- frequency ---
+    if not data.get("frequency"):
+        for freq_keywords, freq_value in _FREQUENCY_KEYWORDS:
+            if any(kw in lower for kw in freq_keywords):
+                data["frequency"] = freq_value
+                break
+
+    # --- schedule_days from frequency (when user said "everyday" / "daily") ---
+    if not data.get("schedule_days") and data.get("frequency") == "daily":
+        data["schedule_days"] = list(ORDERED_DAYS)
+
+    # --- trigger_value from time-of-day words ---
+    if not data.get("trigger_value"):
+        padded = f" {lower} "  # pad so word-boundary checks work
+        for keywords, hhmm in _TIME_OF_DAY:
+            if any(kw in padded for kw in keywords):
+                data["trigger_value"] = hhmm
+                break
+        # Derive from preferred_time if still not set
+        if not data.get("trigger_value") and draft.preferred_time:
+            pt_map = {"morning": "08:00", "afternoon": "14:00", "evening": "20:00"}
+            tv = pt_map.get(draft.preferred_time)
+            if tv:
+                data["trigger_value"] = tv
+
+    return AIIntakeDraft(**data)
+
+
+def chat(
+    message: str,
+    draft: AIIntakeDraft,
+    recent_messages: Optional[List[AIChatMessage]] = None,
+) -> "AIChatResponse":
+    """
+    Single-turn chat handler — the public entry point for /api/ai/chat.
+
+    Returns AIChatResponse with one of four actions:
+      clarify  — Tier 1 needs more info
+      generate — Tier 2 fired; candidates populated
+      advise   — domain Q&A with habit pivot
+      redirect — off-topic
+    """
+    from ..models import AIChatResponse
+
+    if recent_messages is None:
+        recent_messages = []
+
+    provider, model = _provider_and_model()
+
+    # --- Pre-filter (no API cost) ---
+    if _is_clearly_offtopic(message):
+        return AIChatResponse(
+            action="redirect",
+            assistant_message=(
+                "I'm focused on helping you build habits. "
+                "What's one thing you'd like to change about your daily routine?"
+            ),
+            updated_draft=draft,
+            candidates=[],
+        )
+
+    # --- Mock provider short-circuit ---
+    if provider == "mock":
+        updated = _merge_extracted(draft, {})
+        confidence = _compute_confidence(updated)
+        if confidence >= _CONFIDENCE_THRESHOLD:
+            return AIChatResponse(
+                action="generate",
+                assistant_message="Here are two plans I put together for you.",
+                updated_draft=updated,
+                candidates=[],
+            )
+        return AIChatResponse(
+            action="clarify",
+            assistant_message="What category does this habit fall under — fitness, study, wellness, reading, or sleep?",
+            updated_draft=updated,
+            candidates=[],
+        )
+
+    # --- Tier 1: extract + intent ---
+    tier1 = _tier1_call(message, draft, recent_messages, model)
+
+    action = tier1.get("action", "clarify")
+    assistant_message = tier1.get("assistant_message", "")
+    extracted = tier1.get("extracted", {})
+
+    updated_draft = _merge_extracted(draft, extracted)
+
+    # --- Rule-based fallback extraction ---
+    # Fills habit_type, target_value, quantity_unit, category, goal_summary,
+    # and frequency from the user's message when the AI omits them.
+    updated_draft = _apply_rule_based_fallbacks(message, updated_draft)
+
+    # Hard redirect — never generate
+    if action == "redirect":
+        return AIChatResponse(
+            action="redirect",
+            assistant_message=assistant_message,
+            updated_draft=updated_draft,
+            candidates=[],
+        )
+
+    # Compute confidence BEFORE checking advise/clarify.
+    # Tier 2 fires whenever confidence is high enough, regardless of whether
+    # the AI labelled this turn as "clarify" or "advise".
+    confidence = _compute_confidence(updated_draft)
+
+    # --- Tier 2: generate when confident enough ---
+    if confidence >= _CONFIDENCE_THRESHOLD:
+        # Gate: we need a specific reminder time before generating a plan.
+        # If the user mentioned a period ("morning") without an exact time, ask.
+        if updated_draft.trigger_value is None:
+            _habit_noun = (
+                updated_draft.goal_summary.split()[:3] if updated_draft.goal_summary
+                else ["this habit"]
+            )
+            _period = updated_draft.preferred_time or "day"
+            _period_q = (
+                f"What time works best for a reminder? "
+                f"For example, 8:00 AM, 2:00 PM, or another time that fits your routine."
+            )
+            return AIChatResponse(
+                action="clarify",
+                assistant_message=_period_q,
+                updated_draft=updated_draft,
+                candidates=[],
+            )
+
+        tier2 = _tier2_call(updated_draft, model)
+        raw_candidates = tier2.get("candidates", [])
+        candidates = _parse_candidates(raw_candidates)
+        summary = tier2.get("summary_message", "Here are two plans I built for you.")
+        return AIChatResponse(
+            action="generate",
+            assistant_message=summary,
+            updated_draft=updated_draft,
+            candidates=candidates,
+        )
+
+    # --- Still gathering info (clarify or advise) ---
+    return AIChatResponse(
+        action=action,
+        assistant_message=assistant_message,
+        updated_draft=updated_draft,
+        candidates=[],
     )

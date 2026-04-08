@@ -255,6 +255,7 @@ class AIIntakeDraft(BaseModel):
     habit_type: str = "binary"                   # "binary" | "tracked"
     target_value: Optional[float] = None         # for tracked habits (e.g. 5.0 for "5km")
     quantity_unit: Optional[str] = None          # for tracked habits (e.g. "km", "pages")
+    trigger_value: Optional[str] = None          # "HH:MM" — extracted when user states a time
 
 
 class AIIntakeRequest(BaseModel):
@@ -305,6 +306,40 @@ class AIRefineCandidateRequest(BaseModel):
 
 class AICreateCandidateRequest(BaseModel):
     candidate: AIHabitCandidate
+
+
+class AIChatRequest(BaseModel):
+    """Single-turn chat request. Draft carries session state between turns."""
+    message: str
+    draft: AIIntakeDraft = PydanticField(default_factory=AIIntakeDraft)
+    recent_messages: List[AIChatMessage] = PydanticField(default_factory=list)
+
+
+class AIChatCandidate(BaseModel):
+    """One habit variant returned by the chat endpoint."""
+    title: str
+    category: str
+    description: str
+    suggested_schedule: str
+    duration_minutes: int
+    rationale: str
+    variant: str                        # "balanced" | "ambitious"
+    habit_payload: HabitCreate
+    progressions: List[dict] = PydanticField(default_factory=list)
+
+
+class AIChatResponse(BaseModel):
+    """
+    action:
+      clarify  — AI needs more info; assistant_message has the question
+      generate — two candidates ready; candidates list is populated
+      advise   — general domain advice; ends with soft habit pivot
+      redirect — off-topic or out-of-scope; assistant_message explains scope
+    """
+    action: str
+    assistant_message: str
+    updated_draft: AIIntakeDraft
+    candidates: List[AIChatCandidate] = PydanticField(default_factory=list)
 
 
 # ===== FRIENDS MODELS =====
