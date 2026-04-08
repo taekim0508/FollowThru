@@ -107,20 +107,8 @@ enum AIAPI {
         let request = try BackendAPI.request(path: "/api/ai/chat", method: "POST", body: body)
         let (data, response) = try await BackendAPI.perform(request)
 
-        // DEBUG — print raw response so we can see exactly what the backend sends
-        if let raw = String(data: data, encoding: .utf8) {
-            print("=== /api/ai/chat raw response (status \(response.statusCode)) ===")
-            print(raw)
-            print("=== end /api/ai/chat ===")
-        }
-
         if response.statusCode == 200 {
-            do {
-                return try BackendAPI.decodeResponse(AIChatResponseDTO.self, from: data)
-            } catch {
-                print("=== AIChatResponseDTO DECODE ERROR: \(error) ===")
-                throw error
-            }
+            return try BackendAPI.decodeResponse(AIChatResponseDTO.self, from: data)
         }
         throw BackendAPI.decodeError(data, response)
     }

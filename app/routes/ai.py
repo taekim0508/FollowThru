@@ -444,41 +444,15 @@ def chat_endpoint(
       advise   — general habit-domain answer with soft pivot to creation
       redirect — out-of-scope; assistant_message explains
     """
-    import sys
-    print(f"\n{'='*60}", flush=True, file=sys.stderr)
-    print(f"[CHAT] msg={payload.message!r}", flush=True, file=sys.stderr)
-    print(f"[CHAT] draft_in: habit_type={payload.draft.habit_type!r} "
-          f"target_value={payload.draft.target_value} "
-          f"category={payload.draft.category!r} "
-          f"frequency={payload.draft.frequency!r} "
-          f"schedule_days={payload.draft.schedule_days} "
-          f"goal_summary={payload.draft.goal_summary!r}",
-          flush=True, file=sys.stderr)
     try:
-        result = ai_chat(
+        return ai_chat(
             message=payload.message,
             draft=payload.draft,
             recent_messages=payload.recent_messages,
         )
-        from ..services.ai_pipeline import _compute_confidence
-        print(f"[CHAT] action={result.action!r} "
-              f"candidates={len(result.candidates)} "
-              f"confidence={_compute_confidence(result.updated_draft):.3f}",
-              flush=True, file=sys.stderr)
-        print(f"[CHAT] draft_out: habit_type={result.updated_draft.habit_type!r} "
-              f"target_value={result.updated_draft.target_value} "
-              f"schedule_days={result.updated_draft.schedule_days}",
-              flush=True, file=sys.stderr)
-        if result.action == "generate" and result.candidates:
-            print(f"[CHAT] candidates: {[c.title for c in result.candidates]}", flush=True, file=sys.stderr)
-        print(f"{'='*60}\n", flush=True, file=sys.stderr)
-        return result
     except AIPipelineConfigError as exc:
-        print(f"[CHAT] ERROR (config): {exc}", flush=True, file=sys.stderr)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
     except AIPipelineGenerationError as exc:
-        print(f"[CHAT] ERROR (generation): {exc}", flush=True, file=sys.stderr)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     except AIPipelineError as exc:
-        print(f"[CHAT] ERROR (pipeline): {exc}", flush=True, file=sys.stderr)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
