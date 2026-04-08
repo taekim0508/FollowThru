@@ -6,10 +6,10 @@ if __name__ == "__main__":
     # Enable debug endpoints
     os.environ["ENABLE_DEBUG_ENDPOINTS"] = "1"
 
-    # Add .../server to Python path so `import app` works
-    HERE = os.path.dirname(__file__)              # .../server/app
-    SERVER_DIR = os.path.abspath(os.path.join(HERE, ".."))  # .../server
-    sys.path.insert(0, SERVER_DIR)
+    # Add repo root to Python path so `import app` works
+    HERE = os.path.dirname(__file__)              # .../app
+    REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))  # repo root
+    sys.path.insert(0, REPO_ROOT)
 
     uvicorn.run(
         "app.main:app",

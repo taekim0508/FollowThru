@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     
     class Config:
-        # Resolve env file relative to `server/` so running from repo root still works.
+        # Resolve env file relative to repo root so running from any directory works.
         env_file = Path(__file__).resolve().parent.parent / ".env"
 
 settings = Settings()
