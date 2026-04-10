@@ -30,7 +30,7 @@ enum API {
         #if DEBUG
         return ProcessInfo.processInfo.environment["API_BASE_URL"] ?? "http://127.0.0.1:8000"
         #else
-        return ProcessInfo.processInfo.environment["API_BASE_URL"] ?? "https://your-production-host.com"
+        return ProcessInfo.processInfo.environment["API_BASE_URL"] ?? "http://3.140.229.5"
         #endif
     }
 }
