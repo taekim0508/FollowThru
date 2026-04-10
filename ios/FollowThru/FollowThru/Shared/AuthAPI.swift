@@ -27,11 +27,7 @@ enum TokenStore {
 // If you use HTTP (not HTTPS), add an ATS exception in Info.plist.
 enum API {
     static var baseURL: String {
-        #if DEBUG
-        return ProcessInfo.processInfo.environment["API_BASE_URL"] ?? "http://127.0.0.1:8000"
-        #else
         return ProcessInfo.processInfo.environment["API_BASE_URL"] ?? "http://3.140.229.5"
-        #endif
     }
 }
 
