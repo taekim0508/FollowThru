@@ -8,7 +8,7 @@ set -euo pipefail
 
 APP_USER="followthru"
 APP_DIR="/opt/followthru"
-REPO_URL="https://github.com/YOUR_ORG/YOUR_REPO.git"   # <-- update this
+REPO_URL="https://github.com/taekim0508/FollowThru.git"
 
 echo "==> Installing system packages"
 if command -v dnf &>/dev/null; then
