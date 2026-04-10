@@ -1,0 +1,21 @@
+[Unit]
+Description=FollowThru FastAPI backend
+After=network.target
+
+[Service]
+User=followthru
+Group=followthru
+WorkingDirectory=/opt/followthru
+EnvironmentFile=/opt/followthru/.env
+ExecStart=/opt/followthru/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
