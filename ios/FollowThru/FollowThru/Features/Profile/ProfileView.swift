@@ -22,7 +22,7 @@ struct ProfileView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "person.circle.fill")
                             .font(.system(size: 80))
-                            .foregroundColor(Theme.softBlue)
+                            .foregroundColor(Theme.sage)
                         Text(appState.currentUser?.username ?? "User")
                             .font(.title2).bold()
                             .foregroundColor(Theme.primary)

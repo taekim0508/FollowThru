@@ -73,9 +73,10 @@ struct CompletionModalView: View {
 
             if showNotes {
                 TextEditor(text: $note)
+                    .foregroundColor(Theme.primary)
                     .frame(height: 90)
                     .padding(8)
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.softBlue.opacity(0.5)))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
                     .transition(.opacity)
             }
 

@@ -27,14 +27,16 @@ struct SettingsView: View {
                     Spacer()
                     TextField("Name", text: $name)
                         .multilineTextAlignment(.trailing)
-                        .foregroundColor(Theme.textSecondary)
+                        .foregroundColor(Theme.primary)
+                        .accentColor(Theme.primary)
                 }
                 HStack {
                     Label("Email", systemImage: "envelope")
                     Spacer()
                     TextField("Email", text: $email)
                         .multilineTextAlignment(.trailing)
-                        .foregroundColor(Theme.textSecondary)
+                        .foregroundColor(Theme.primary)
+                        .accentColor(Theme.primary)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
                 }

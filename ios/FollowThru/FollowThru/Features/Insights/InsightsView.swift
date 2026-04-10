@@ -98,7 +98,7 @@ struct InsightsView: View {
         VStack(spacing: 14) {
             Image(systemName: "chart.bar.xaxis")
                 .font(.system(size: 48))
-                .foregroundColor(Theme.softBlue)
+                .foregroundColor(Theme.sage)
             Text("No habits yet")
                 .font(.headline)
             Text("Create a habit to start tracking insights")
@@ -183,7 +183,7 @@ struct HabitAnalyticsView: View {
         VStack(spacing: 12) {
             Image(systemName: "chart.bar.xaxis")
                 .font(.system(size: 48))
-                .foregroundColor(Theme.softBlue)
+                .foregroundColor(Theme.sage)
             Text("Complete this habit to start seeing analytics")
                 .font(.subheadline)
                 .foregroundColor(Theme.textSecondary)
@@ -307,7 +307,7 @@ struct HabitAnalyticsView: View {
                                     // value bar
                                     if let value = bar.value, value > 0, maxValue > 0 {
                                         RoundedRectangle(cornerRadius: 4)
-                                            .fill(bar.isComplete == true ? Theme.sage : Theme.softBlue)
+                                            .fill(bar.isComplete == true ? Theme.sage : Theme.textTertiary)
                                             .frame(
                                                 width: 24,
                                                 height: max(4, CGFloat(value / maxValue) * chartHeight)
@@ -330,7 +330,7 @@ struct HabitAnalyticsView: View {
             // legend
             HStack(spacing: 16) {
                 legendItem(color: Theme.sage, label: "Goal met")
-                legendItem(color: Theme.softBlue, label: "Partial")
+                legendItem(color: Theme.textTertiary, label: "Partial")
             }
         }
     }
@@ -363,7 +363,7 @@ struct HabitAnalyticsView: View {
             )
             statCard(
                 icon: "checkmark.circle.fill",
-                color: Theme.softBlue,
+                color: Theme.sage,
                 value: "\(analytics.totalCompletions)",
                 label: "Total Completions",
                 suffix: nil
@@ -399,7 +399,7 @@ struct HabitAnalyticsView: View {
             if let total = analytics.totalValue {
                 statCard(
                     icon: "sum",
-                    color: Theme.softBlue,
+                    color: Theme.sage,
                     value: formatValue(total),
                     label: "Total",
                     suffix: unit
