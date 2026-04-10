@@ -9,17 +9,16 @@ set -euo pipefail
 APP_USER="followthru"
 APP_DIR="/opt/followthru"
 REPO_URL="https://github.com/YOUR_ORG/YOUR_REPO.git"   # <-- update this
-DOMAIN="api.yourdomain.com"                             # <-- update this
 
 echo "==> Installing system packages"
 if command -v dnf &>/dev/null; then
   # Amazon Linux 2023
   sudo dnf update -y
-  sudo dnf install -y python3.11 python3.11-pip python3.11-devel git nginx certbot python3-certbot-nginx
+  sudo dnf install -y python3.11 python3.11-pip python3.11-devel git nginx
 else
   # Ubuntu 22.04
   sudo apt-get update -y
-  sudo apt-get install -y python3.11 python3.11-venv python3-pip git nginx certbot python3-certbot-nginx
+  sudo apt-get install -y python3.11 python3.11-venv python3-pip git nginx
 fi
 
 echo "==> Creating app user"
@@ -48,9 +47,6 @@ sudo cp "$APP_DIR/deploy/nginx.conf" /etc/nginx/conf.d/followthru.conf
 sudo nginx -t
 sudo systemctl enable nginx
 sudo systemctl restart nginx
-
-echo "==> Obtaining TLS certificate (Let's Encrypt)"
-sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m admin@"$DOMAIN"
 
 echo "==> Done! Service status:"
 sudo systemctl status followthru --no-pager
