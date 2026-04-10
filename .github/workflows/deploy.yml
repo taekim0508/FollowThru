@@ -1,0 +1,42 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}         # e.g. 54.123.45.67 or api.yourdomain.com
+          username: ${{ secrets.EC2_USER }}      # e.g. ec2-user (Amazon Linux) or ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}        # contents of your .pem private key
+          script: |
+            set -euo pipefail
+
+            APP_DIR="/opt/followthru"
+
+            echo "==> Pulling latest code"
+            cd "$APP_DIR"
+            sudo -u followthru git fetch origin main
+            sudo -u followthru git reset --hard origin/main
+
+            echo "==> Installing/updating Python dependencies"
+            sudo -u followthru .venv/bin/pip install --upgrade pip -q
+            sudo -u followthru .venv/bin/pip install -r requirements.txt -q
+
+            echo "==> Restarting service"
+            sudo systemctl restart followthru
+
+            echo "==> Verifying health"
+            sleep 3
+            curl -sf http://127.0.0.1:8000/health || (echo "Health check failed!" && exit 1)
+
+            echo "==> Deploy complete"
