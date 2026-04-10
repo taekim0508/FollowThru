@@ -33,8 +33,10 @@ struct AuthView: View {
                 toggleTab("Sign In", selected: !isSignUp) { isSignUp = false }
                 toggleTab("Sign Up", selected: isSignUp)  { isSignUp = true }
             }
-            .background(Theme.offWhite)
+            .background(Theme.white)
             .cornerRadius(10)
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray, lineWidth: 1))
+            .shadow(color: Theme.shadow, radius: 4, x: 0, y: 2)
             .padding(.horizontal)
             .padding(.bottom, 24)
 
@@ -88,8 +90,8 @@ struct AuthView: View {
     @ViewBuilder
     private func field(_ placeholder: String, text: Binding<String>, icon: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).foregroundColor(Theme.textSecondary).frame(width: 20)
-            TextField(placeholder, text: text)
+            Image(systemName: icon).foregroundColor(Theme.primary).frame(width: 20)
+            TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textSecondary))
                 .foregroundColor(Theme.primary)
                 .accentColor(Theme.primary)
         }
@@ -102,8 +104,8 @@ struct AuthView: View {
     @ViewBuilder
     private func secureField(_ placeholder: String, text: Binding<String>, icon: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).foregroundColor(Theme.textSecondary).frame(width: 20)
-            SecureField(placeholder, text: text)
+            Image(systemName: icon).foregroundColor(Theme.primary).frame(width: 20)
+            SecureField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textSecondary))
                 .foregroundColor(Theme.primary)
                 .accentColor(Theme.primary)
         }
@@ -120,14 +122,9 @@ struct AuthView: View {
                 .font(.subheadline).fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
-                .background(selected ? Theme.white : Color.clear)
-                .foregroundColor(selected ? Theme.primary : Theme.textSecondary)
+                .background(selected ? Theme.primary : Color.clear)
+                .foregroundColor(selected ? Theme.white : Theme.textSecondary)
                 .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Theme.primary, lineWidth: 1.5)
-                        .opacity(selected ? 1 : 0)
-                )
         }
         .padding(4)
     }
