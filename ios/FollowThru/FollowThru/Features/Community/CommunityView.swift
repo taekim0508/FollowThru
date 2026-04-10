@@ -23,7 +23,7 @@ struct CommunityView: View {
                             .font(.headline)
                             .foregroundColor(Theme.primary)
                         HStack {
-                            TextField("Search by name or email", text: $searchText)
+                            TextField("", text: $searchText, prompt: Text("Search by name or email").foregroundColor(Theme.textSecondary))
                                 .foregroundColor(Theme.primary)
                                 .accentColor(Theme.primary)
                                 .textInputAutocapitalization(.never)
@@ -246,7 +246,7 @@ private struct CommentSheet: View {
                     }
                 }
                 HStack {
-                    TextField("Comment", text: $newComment)
+                    TextField("", text: $newComment, prompt: Text("Comment").foregroundColor(Theme.textSecondary))
                         .foregroundColor(Theme.primary)
                         .accentColor(Theme.primary)
                         .padding(10)

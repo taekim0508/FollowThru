@@ -66,7 +66,7 @@ struct CreateHabitView: View {
 
                     // Name
                     fieldSection("Habit Name") {
-                        TextField("e.g. Morning Run", text: $name)
+                        TextField("", text: $name, prompt: Text("e.g. Morning Run").foregroundColor(Theme.textSecondary))
                             .foregroundColor(Theme.primary)
                             .accentColor(Theme.primary)
                             .padding(12)
@@ -77,7 +77,7 @@ struct CreateHabitView: View {
 
                     // Description
                     fieldSection("Description (optional)") {
-                        TextField("What does this habit involve?", text: $description)
+                        TextField("", text: $description, prompt: Text("What does this habit involve?").foregroundColor(Theme.textSecondary))
                             .foregroundColor(Theme.primary)
                             .accentColor(Theme.primary)
                             .padding(12)
@@ -98,7 +98,7 @@ struct CreateHabitView: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 // target value
                                 HStack {
-                                    TextField("Target amount", text: $targetValueString)
+                                    TextField("", text: $targetValueString, prompt: Text("Target amount").foregroundColor(Theme.textSecondary))
                                         .keyboardType(.decimalPad)
                                         .foregroundColor(Theme.primary)
                                         .accentColor(Theme.primary)
@@ -151,7 +151,7 @@ struct CreateHabitView: View {
                                 }
 
                                 if showCustomUnit {
-                                    TextField("Enter custom unit", text: $quantityUnit)
+                                    TextField("", text: $quantityUnit, prompt: Text("Enter custom unit").foregroundColor(Theme.textSecondary))
                                         .foregroundColor(Theme.primary)
                                         .accentColor(Theme.primary)
                                         .padding(12)
@@ -194,8 +194,9 @@ struct CreateHabitView: View {
                     // Motivation Statement — optional
                     fieldSection("Motivation (optional)") {
                         TextField(
-                            "Why do you want to build this habit?",
+                            "",
                             text: $motivationStatement,
+                            prompt: Text("Why do you want to build this habit?").foregroundColor(Theme.textSecondary),
                             axis: .vertical
                         )
                         .foregroundColor(Theme.primary)
