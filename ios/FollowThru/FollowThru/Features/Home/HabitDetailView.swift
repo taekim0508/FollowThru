@@ -163,6 +163,8 @@ struct HabitDetailView: View {
         fieldSection("Habit Name") {
             if isEditing {
                 TextField("Habit name", text: $name)
+                    .foregroundColor(Theme.primary)
+                    .accentColor(Theme.primary)
                     .padding(12)
                     .background(Theme.white)
                     .cornerRadius(10)
@@ -177,6 +179,8 @@ struct HabitDetailView: View {
         fieldSection("Description") {
             if isEditing {
                 TextField("Description", text: $description)
+                    .foregroundColor(Theme.primary)
+                    .accentColor(Theme.primary)
                     .padding(12)
                     .background(Theme.white)
                     .cornerRadius(10)
@@ -312,6 +316,8 @@ struct HabitDetailView: View {
                     text: $motivationStatement,
                     axis: .vertical
                 )
+                .foregroundColor(Theme.primary)
+                .accentColor(Theme.primary)
                 .lineLimit(3...5)
                 .padding(12)
                 .background(Theme.white)

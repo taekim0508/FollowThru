@@ -67,6 +67,8 @@ struct CreateHabitView: View {
                     // Name
                     fieldSection("Habit Name") {
                         TextField("e.g. Morning Run", text: $name)
+                            .foregroundColor(Theme.primary)
+                            .accentColor(Theme.primary)
                             .padding(12)
                             .background(Theme.white)
                             .cornerRadius(10)
@@ -76,6 +78,8 @@ struct CreateHabitView: View {
                     // Description
                     fieldSection("Description (optional)") {
                         TextField("What does this habit involve?", text: $description)
+                            .foregroundColor(Theme.primary)
+                            .accentColor(Theme.primary)
                             .padding(12)
                             .background(Theme.white)
                             .cornerRadius(10)
@@ -96,6 +100,8 @@ struct CreateHabitView: View {
                                 HStack {
                                     TextField("Target amount", text: $targetValueString)
                                         .keyboardType(.decimalPad)
+                                        .foregroundColor(Theme.primary)
+                                        .accentColor(Theme.primary)
                                         .padding(12)
                                         .background(Theme.white)
                                         .cornerRadius(10)
@@ -146,6 +152,8 @@ struct CreateHabitView: View {
 
                                 if showCustomUnit {
                                     TextField("Enter custom unit", text: $quantityUnit)
+                                        .foregroundColor(Theme.primary)
+                                        .accentColor(Theme.primary)
                                         .padding(12)
                                         .background(Theme.white)
                                         .cornerRadius(10)
@@ -190,6 +198,8 @@ struct CreateHabitView: View {
                             text: $motivationStatement,
                             axis: .vertical
                         )
+                        .foregroundColor(Theme.primary)
+                        .accentColor(Theme.primary)
                         .lineLimit(3...5)
                         .padding(12)
                         .background(Theme.white)

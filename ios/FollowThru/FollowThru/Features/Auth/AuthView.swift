@@ -90,6 +90,8 @@ struct AuthView: View {
         HStack(spacing: 10) {
             Image(systemName: icon).foregroundColor(Theme.textSecondary).frame(width: 20)
             TextField(placeholder, text: text)
+                .foregroundColor(Theme.primary)
+                .accentColor(Theme.primary)
         }
         .padding(14)
         .background(Theme.white)
@@ -102,6 +104,8 @@ struct AuthView: View {
         HStack(spacing: 10) {
             Image(systemName: icon).foregroundColor(Theme.textSecondary).frame(width: 20)
             SecureField(placeholder, text: text)
+                .foregroundColor(Theme.primary)
+                .accentColor(Theme.primary)
         }
         .padding(14)
         .background(Theme.white)
@@ -119,6 +123,11 @@ struct AuthView: View {
                 .background(selected ? Theme.white : Color.clear)
                 .foregroundColor(selected ? Theme.primary : Theme.textSecondary)
                 .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.primary, lineWidth: 1.5)
+                        .opacity(selected ? 1 : 0)
+                )
         }
         .padding(4)
     }

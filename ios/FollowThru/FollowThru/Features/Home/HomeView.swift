@@ -155,11 +155,11 @@ struct HomeView: View {
             HStack(spacing: 12) {
                 // icon
                 Circle()
-                    .fill(habit.todayComplete ? Theme.sage : Theme.softBlue.opacity(0.25))
+                    .fill(habit.todayComplete ? Theme.sage : Theme.sageLight)
                     .frame(width: 44, height: 44)
                     .overlay(
                         Image(systemName: habit.todayComplete ? "checkmark" : habitIcon(habit))
-                            .foregroundColor(habit.todayComplete ? Theme.white : Theme.softBlue)
+                            .foregroundColor(habit.todayComplete ? Theme.white : Theme.sage)
                             .font(.system(size: 16, weight: .semibold))
                     )
 
@@ -244,7 +244,7 @@ struct HomeView: View {
         VStack(spacing: 14) {
             Image(systemName: "list.bullet.clipboard")
                 .font(.system(size: 48))
-                .foregroundColor(Theme.softBlue)
+                .foregroundColor(Theme.sage)
             Text("No habits yet")
                 .font(.headline)
             Text("Tap + to create your first habit")
