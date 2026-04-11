@@ -29,14 +29,11 @@ struct AuthView: View {
             .padding(.bottom, 36)
 
             // Toggle
-            HStack(spacing: 0) {
-                toggleTab("Sign In", selected: !isSignUp) { isSignUp = false }
-                toggleTab("Sign Up", selected: isSignUp)  { isSignUp = true }
+            Picker("", selection: $isSignUp) {
+                Text("Sign In").tag(false)
+                Text("Sign Up").tag(true)
             }
-            .background(Theme.white)
-            .cornerRadius(10)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray, lineWidth: 1))
-            .shadow(color: Theme.shadow, radius: 4, x: 0, y: 2)
+            .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.bottom, 24)
 
@@ -115,17 +112,4 @@ struct AuthView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.lightGray, lineWidth: 1))
     }
 
-    @ViewBuilder
-    private func toggleTab(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.subheadline).fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(selected ? Theme.primary : Color.clear)
-                .foregroundColor(selected ? Theme.white : Theme.textSecondary)
-                .cornerRadius(8)
-        }
-        .padding(4)
-    }
 }

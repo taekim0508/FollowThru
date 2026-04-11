@@ -25,7 +25,7 @@ struct SettingsView: View {
                 HStack {
                     Label("Name", systemImage: "person")
                     Spacer()
-                    TextField("Name", text: $name)
+                    TextField("", text: $name, prompt: Text("Name").foregroundColor(Theme.textSecondary))
                         .multilineTextAlignment(.trailing)
                         .foregroundColor(Theme.primary)
                         .accentColor(Theme.primary)
@@ -33,16 +33,16 @@ struct SettingsView: View {
                 HStack {
                     Label("Email", systemImage: "envelope")
                     Spacer()
-                    TextField("Email", text: $email)
+                    TextField("", text: $email, prompt: Text("Email").foregroundColor(Theme.textSecondary))
                         .multilineTextAlignment(.trailing)
                         .foregroundColor(Theme.primary)
                         .accentColor(Theme.primary)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
                 }
-                SecureField("Current password", text: $currentPassword)
+                SecureField("", text: $currentPassword, prompt: Text("Current password").foregroundColor(Theme.textSecondary))
                     .textContentType(.password)
-                SecureField("New password", text: $newPassword)
+                SecureField("", text: $newPassword, prompt: Text("New password").foregroundColor(Theme.textSecondary))
                     .textContentType(.newPassword)
                 if let error = appState.authError {
                     Text(error)
