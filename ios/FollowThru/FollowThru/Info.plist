@@ -8,8 +8,7 @@
         <false/>
         <key>NSExceptionDomains</key>
         <dict>
-            <!-- Replace with your actual Elastic IP -->
-            <key>YOUR_ELASTIC_IP</key>
+            <key>3.140.229.5</key>
             <dict>
                 <key>NSExceptionAllowsInsecureHTTPLoads</key>
                 <true/>
