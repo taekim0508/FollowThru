@@ -154,7 +154,12 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     current_password: Optional[str] = None
     new_password: Optional[str] = None
-    
+
+
+class AccountDeleteBody(BaseModel):
+    """Confirm account deletion with current password."""
+    password: str
+
 
 class HabitCreate(BaseModel):
     name: str

@@ -14,8 +14,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..database import get_session
-from ..models import User, UserCreate, UserLogin, UserUpdate  # UserUpdate for PATCH /me
+from ..models import (
+    AccountDeleteBody,
+    User,
+    UserCreate,
+    UserLogin,
+    UserUpdate,
+)
 from ..deps import current_user  # for GET /me and PATCH /me
+from ..services.account_deletion import delete_user_account_data
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -146,3 +153,26 @@ def update_me(
     session.commit()
     session.refresh(user)
     return public_user(user)
+
+
+@router.post("/delete-account", status_code=status.HTTP_200_OK)
+def delete_account(
+    payload: AccountDeleteBody,
+    session: Session = Depends(get_session),
+    user: User = Depends(current_user),
+):
+    """
+    Permanently delete the authenticated user and all related data.
+    Requires the current account password.
+    """
+    if not payload.password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="password required")
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password",
+        )
+    uid = user.id
+    delete_user_account_data(session, uid)
+    session.commit()
+    return {"message": "Account deleted"}
