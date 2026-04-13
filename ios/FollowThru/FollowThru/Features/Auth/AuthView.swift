@@ -29,12 +29,11 @@ struct AuthView: View {
             .padding(.bottom, 36)
 
             // Toggle
-            HStack(spacing: 0) {
-                toggleTab("Sign In", selected: !isSignUp) { isSignUp = false }
-                toggleTab("Sign Up", selected: isSignUp)  { isSignUp = true }
+            Picker("", selection: $isSignUp) {
+                Text("Sign In").tag(false)
+                Text("Sign Up").tag(true)
             }
-            .background(Theme.offWhite)
-            .cornerRadius(10)
+            .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.bottom, 24)
 
@@ -88,8 +87,10 @@ struct AuthView: View {
     @ViewBuilder
     private func field(_ placeholder: String, text: Binding<String>, icon: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).foregroundColor(Theme.textSecondary).frame(width: 20)
-            TextField(placeholder, text: text)
+            Image(systemName: icon).foregroundColor(Theme.primary).frame(width: 20)
+            TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textSecondary))
+                .foregroundColor(Theme.primary)
+                .accentColor(Theme.primary)
         }
         .padding(14)
         .background(Theme.white)
@@ -100,8 +101,10 @@ struct AuthView: View {
     @ViewBuilder
     private func secureField(_ placeholder: String, text: Binding<String>, icon: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).foregroundColor(Theme.textSecondary).frame(width: 20)
-            SecureField(placeholder, text: text)
+            Image(systemName: icon).foregroundColor(Theme.primary).frame(width: 20)
+            SecureField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textSecondary))
+                .foregroundColor(Theme.primary)
+                .accentColor(Theme.primary)
         }
         .padding(14)
         .background(Theme.white)
@@ -109,17 +112,4 @@ struct AuthView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.lightGray, lineWidth: 1))
     }
 
-    @ViewBuilder
-    private func toggleTab(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.subheadline).fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(selected ? Theme.white : Color.clear)
-                .foregroundColor(selected ? Theme.primary : Theme.textSecondary)
-                .cornerRadius(8)
-        }
-        .padding(4)
-    }
 }

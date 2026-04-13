@@ -23,10 +23,15 @@ struct CommunityView: View {
                             .font(.headline)
                             .foregroundColor(Theme.primary)
                         HStack {
-                            TextField("Search by name or email", text: $searchText)
-                                .textFieldStyle(.roundedBorder)
+                            TextField("", text: $searchText, prompt: Text("Search by name or email").foregroundColor(Theme.textSecondary))
+                                .foregroundColor(Theme.primary)
+                                .accentColor(Theme.primary)
                                 .textInputAutocapitalization(.never)
                                 .keyboardType(.emailAddress)
+                                .padding(10)
+                                .background(Theme.white)
+                                .cornerRadius(10)
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
                             Button("Search") {
                                 Task { await appState.searchUsers(query: searchText) }
                             }
@@ -60,7 +65,7 @@ struct CommunityView: View {
                             ForEach(appState.friendsList) { f in
                                 HStack {
                                     Image(systemName: "person.circle.fill")
-                                        .foregroundColor(Theme.softBlue)
+                                        .foregroundColor(Theme.sage)
                                     Text(f.name ?? f.email)
                                         .foregroundColor(Theme.primary)
                                     Spacer()
@@ -241,8 +246,13 @@ private struct CommentSheet: View {
                     }
                 }
                 HStack {
-                    TextField("Comment", text: $newComment)
-                        .textFieldStyle(.roundedBorder)
+                    TextField("", text: $newComment, prompt: Text("Comment").foregroundColor(Theme.textSecondary))
+                        .foregroundColor(Theme.primary)
+                        .accentColor(Theme.primary)
+                        .padding(10)
+                        .background(Theme.white)
+                        .cornerRadius(10)
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
                     Button("Send") {
                         Task {
                             let t = newComment.trimmingCharacters(in: .whitespacesAndNewlines)

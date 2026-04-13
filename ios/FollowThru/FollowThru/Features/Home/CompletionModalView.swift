@@ -72,11 +72,21 @@ struct CompletionModalView: View {
             }
 
             if showNotes {
-                TextEditor(text: $note)
-                    .frame(height: 90)
-                    .padding(8)
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.softBlue.opacity(0.5)))
-                    .transition(.opacity)
+                ZStack(alignment: .topLeading) {
+                    if note.isEmpty {
+                        Text("Add a note...")
+                            .foregroundColor(Theme.textSecondary)
+                            .padding(.top, 16)
+                            .padding(.leading, 12)
+                            .allowsHitTesting(false)
+                    }
+                    TextEditor(text: $note)
+                        .foregroundColor(Theme.primary)
+                        .frame(height: 90)
+                }
+                .padding(4)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
+                .transition(.opacity)
             }
 
             if isLoading {

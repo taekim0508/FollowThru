@@ -175,6 +175,19 @@ final class AppState: ObservableObject {
         isAuthLoading = false
     }
 
+    /// Permanently deletes the server account (requires correct password), then clears local session.
+    func deleteAccount(password: String) async {
+        isAuthLoading = true
+        authError = nil
+        do {
+            try await AuthAPI.deleteAccount(password: password)
+            logout()
+        } catch {
+            authError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        isAuthLoading = false
+    }
+
     // MARK: - Habits
 
     func loadHabits() async {

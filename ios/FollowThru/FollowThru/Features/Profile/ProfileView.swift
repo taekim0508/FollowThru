@@ -3,7 +3,9 @@ import SwiftUI
 struct ProfileView: View {
     @EnvironmentObject var appState: AppState
 
-    private let achievements = ["🔥 7 Day Streak", "✅ First Habit", "🌅 Early Bird"]
+    private var achievementBadges: [AchievementBadge] {
+        AchievementRules.badges(for: appState.habits)
+    }
 
     private var maxStreak: Int {
         appState.habits.map { $0.maxStreak }.max() ?? 0
@@ -22,7 +24,7 @@ struct ProfileView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "person.circle.fill")
                             .font(.system(size: 80))
-                            .foregroundColor(Theme.softBlue)
+                            .foregroundColor(Theme.sage)
                         Text(appState.currentUser?.username ?? "User")
                             .font(.title2).bold()
                             .foregroundColor(Theme.primary)
@@ -41,13 +43,14 @@ struct ProfileView: View {
 
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
-                                ForEach(achievements, id: \.self) { badge in
-                                    Text(badge)
+                                ForEach(achievementBadges) { badge in
+                                    Text(badge.title)
                                         .font(.subheadline).fontWeight(.medium)
                                         .padding(.horizontal, 14).padding(.vertical, 8)
-                                        .background(Theme.sageLight)
-                                        .foregroundColor(Theme.sage)
+                                        .background(badge.isUnlocked ? Theme.sageLight : Theme.offWhite)
+                                        .foregroundColor(badge.isUnlocked ? Theme.sage : Theme.textSecondary)
                                         .cornerRadius(20)
+                                        .opacity(badge.isUnlocked ? 1 : 0.55)
                                 }
                             }
                             .padding(.horizontal)

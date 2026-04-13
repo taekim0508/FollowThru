@@ -142,3 +142,44 @@ def test_multiple_users(client):
     r2 = client.get("/api/auth/me", headers=auth_headers(t2))
     assert r1.json()["email"] == "alice@example.com"
     assert r2.json()["email"] == "bob@example.com"
+
+
+# ---------------------------------------------------------------------------
+# POST /delete-account
+# ---------------------------------------------------------------------------
+
+
+def test_delete_account_success(client):
+    register_user(client)
+    token = get_token(client)
+    r = client.post(
+        "/api/auth/delete-account",
+        json={"password": "password123"},
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 200
+    assert r.json().get("message") == "Account deleted"
+    # token is invalid — user row gone
+    r2 = client.get("/api/auth/me", headers=auth_headers(token))
+    assert r2.status_code in (401, 403)
+    # cannot log in again with same credentials
+    r3 = login_user(client)
+    assert r3.status_code in (401, 403)
+
+
+def test_delete_account_wrong_password(client):
+    register_user(client)
+    token = get_token(client)
+    r = client.post(
+        "/api/auth/delete-account",
+        json={"password": "wrongpassword"},
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 401
+    r2 = client.get("/api/auth/me", headers=auth_headers(token))
+    assert r2.status_code == 200
+
+
+def test_delete_account_requires_auth(client):
+    r = client.post("/api/auth/delete-account", json={"password": "password123"})
+    assert r.status_code in (401, 403)

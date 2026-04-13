@@ -162,7 +162,9 @@ struct HabitDetailView: View {
     private var nameSection: some View {
         fieldSection("Habit Name") {
             if isEditing {
-                TextField("Habit name", text: $name)
+                TextField("", text: $name, prompt: Text("Habit name").foregroundColor(Theme.textSecondary))
+                    .foregroundColor(Theme.primary)
+                    .accentColor(Theme.primary)
                     .padding(12)
                     .background(Theme.white)
                     .cornerRadius(10)
@@ -176,7 +178,9 @@ struct HabitDetailView: View {
     private var descriptionSection: some View {
         fieldSection("Description") {
             if isEditing {
-                TextField("Description", text: $description)
+                TextField("", text: $description, prompt: Text("Description").foregroundColor(Theme.textSecondary))
+                    .foregroundColor(Theme.primary)
+                    .accentColor(Theme.primary)
                     .padding(12)
                     .background(Theme.white)
                     .cornerRadius(10)
@@ -308,10 +312,13 @@ struct HabitDetailView: View {
         fieldSection("Motivation") {
             if isEditing {
                 TextField(
-                    "Why do you want to build this habit?",
+                    "",
                     text: $motivationStatement,
+                    prompt: Text("Why do you want to build this habit?").foregroundColor(Theme.textSecondary),
                     axis: .vertical
                 )
+                .foregroundColor(Theme.primary)
+                .accentColor(Theme.primary)
                 .lineLimit(3...5)
                 .padding(12)
                 .background(Theme.white)

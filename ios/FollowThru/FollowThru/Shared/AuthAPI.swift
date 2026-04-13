@@ -192,6 +192,35 @@ enum AuthAPI {
         }
         throw decodeError(data, response)
     }
+
+    /// POST /api/auth/delete-account — permanently deletes the user; clears stored token on success.
+    static func deleteAccount(password: String) async throws {
+        guard let token = TokenStore.get() else { throw AuthAPIError.notAuthenticated }
+        let body: [String: Any] = ["password": password]
+        var req = URLRequest(url: url("/api/auth/delete-account"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw AuthAPIError.unknown }
+
+        if http.statusCode == 200 {
+            TokenStore.clear()
+            return
+        }
+        if http.statusCode == 401 {
+            let detailMessage = detailString(from: data)
+            if detailMessage?.lowercased().contains("incorrect") == true
+                || detailMessage?.lowercased().contains("password") == true {
+                throw AuthAPIError.message(detailMessage ?? "Incorrect password")
+            }
+            TokenStore.clear()
+            throw AuthAPIError.notAuthenticated
+        }
+        throw decodeError(data, response)
+    }
 }
 
 /// Extract backend "detail" as a single string (for 401 handling).

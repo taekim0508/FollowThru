@@ -63,6 +63,8 @@ struct AIChatView: View {
                             .padding(.vertical, 12)
                     }
                     TextField("", text: $input, axis: .vertical)
+                        .foregroundColor(Theme.primary)
+                        .accentColor(Theme.primary)
                         .lineLimit(1...4)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)

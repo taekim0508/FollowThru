@@ -9,7 +9,8 @@ struct SettingsView: View {
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var notificationsEnabled = false
-    @State private var showDeleteConfirm = false
+    @State private var showDeleteAccountSheet = false
+    @State private var deleteAccountPassword = ""
 
     private var hasAccountChanges: Bool {
         let user = appState.currentUser
@@ -25,22 +26,24 @@ struct SettingsView: View {
                 HStack {
                     Label("Name", systemImage: "person")
                     Spacer()
-                    TextField("Name", text: $name)
+                    TextField("", text: $name, prompt: Text("Name").foregroundColor(Theme.textSecondary))
                         .multilineTextAlignment(.trailing)
-                        .foregroundColor(Theme.textSecondary)
+                        .foregroundColor(Theme.primary)
+                        .accentColor(Theme.primary)
                 }
                 HStack {
                     Label("Email", systemImage: "envelope")
                     Spacer()
-                    TextField("Email", text: $email)
+                    TextField("", text: $email, prompt: Text("Email").foregroundColor(Theme.textSecondary))
                         .multilineTextAlignment(.trailing)
-                        .foregroundColor(Theme.textSecondary)
+                        .foregroundColor(Theme.primary)
+                        .accentColor(Theme.primary)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
                 }
-                SecureField("Current password", text: $currentPassword)
+                SecureField("", text: $currentPassword, prompt: Text("Current password").foregroundColor(Theme.textSecondary))
                     .textContentType(.password)
-                SecureField("New password", text: $newPassword)
+                SecureField("", text: $newPassword, prompt: Text("New password").foregroundColor(Theme.textSecondary))
                     .textContentType(.newPassword)
                 if let error = appState.authError {
                     Text(error)
@@ -68,7 +71,8 @@ struct SettingsView: View {
 
             Section {
                 Button("Delete Account", role: .destructive) {
-                    showDeleteConfirm = true
+                    deleteAccountPassword = ""
+                    showDeleteAccountSheet = true
                 }
             }
         }
@@ -84,17 +88,55 @@ struct SettingsView: View {
         .onChange(of: email) { _, _ in appState.authError = nil }
         .onChange(of: currentPassword) { _, _ in appState.authError = nil }
         .onChange(of: newPassword) { _, _ in appState.authError = nil }
-        .confirmationDialog(
-            "Delete your account?",
-            isPresented: $showDeleteConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Account", role: .destructive) {
-                appState.logout()
+        .sheet(isPresented: $showDeleteAccountSheet, onDismiss: {
+            deleteAccountPassword = ""
+        }) {
+            NavigationStack {
+                Form {
+                    Section {
+                        Text(
+                            "This permanently deletes your account, habits, completions, and community data on the server. You cannot undo this."
+                        )
+                        .font(.footnote)
+                        .foregroundColor(Theme.textSecondary)
+                    }
+                    Section {
+                        SecureField("Current password", text: $deleteAccountPassword)
+                            .textContentType(.password)
+                        if let err = appState.authError {
+                            Text(err)
+                                .font(.footnote)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    Section {
+                        Button("Permanently delete my account", role: .destructive) {
+                            Task {
+                                await appState.deleteAccount(password: deleteAccountPassword)
+                                if appState.authError == nil {
+                                    showDeleteAccountSheet = false
+                                    dismiss()
+                                }
+                            }
+                        }
+                        .disabled(deleteAccountPassword.isEmpty || appState.isAuthLoading)
+                        if appState.isAuthLoading {
+                            ProgressView().frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .navigationTitle("Delete account")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            appState.authError = nil
+                            showDeleteAccountSheet = false
+                        }
+                    }
+                }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This action cannot be undone.")
+            .environmentObject(appState)
         }
     }
 
