@@ -176,6 +176,7 @@ struct CreateHabitView: View {
                         ) {
                             ForEach(categories, id: \.self) { category in
                                 let selected = selectedCategory == category
+                                let style = Theme.categoryChipStyle(category)
                                 Button {
                                     selectedCategory = category
                                 } label: {
@@ -183,8 +184,8 @@ struct CreateHabitView: View {
                                         .font(.subheadline).fontWeight(.medium)
                                         .padding(.horizontal, 12).padding(.vertical, 8)
                                         .frame(maxWidth: .infinity)
-                                        .background(selected ? Theme.primary : Theme.offWhite)
-                                        .foregroundColor(selected ? Theme.white : Theme.textSecondary)
+                                        .background(selected ? style.foreground : style.background)
+                                        .foregroundColor(selected ? .white : style.foreground)
                                         .cornerRadius(20)
                                 }
                             }

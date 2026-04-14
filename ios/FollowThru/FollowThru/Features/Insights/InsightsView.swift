@@ -67,11 +67,12 @@ struct InsightsView: View {
                             .foregroundColor(Theme.textSecondary)
                     }
 
+                    let chipStyle = Theme.categoryChipStyle(habit.category)
                     Text(habit.category)
                         .font(.caption)
                         .padding(.horizontal, 8).padding(.vertical, 2)
-                        .background(Theme.sageLight)
-                        .foregroundColor(Theme.sage)
+                        .background(chipStyle.background)
+                        .foregroundColor(chipStyle.foreground)
                         .cornerRadius(8)
 
                     if !habit.description.isEmpty {
@@ -208,9 +209,14 @@ struct HabitAnalyticsView: View {
     private func binaryChart(_ analytics: BinaryAnalytics) -> some View {
         HabitCard {
             VStack(alignment: .leading, spacing: 12) {
-                Text(habit.name)
-                    .font(.headline)
-                    .foregroundColor(Theme.primary)
+                HStack(spacing: 0) {
+                    Text(habit.name)
+                        .font(.headline)
+                        .foregroundColor(Theme.primary)
+                    Text("  |  \(formatDateRange(start: analytics.startDate, end: analytics.endDate))")
+                        .font(.headline)
+                        .foregroundColor(Theme.textSecondary)
+                }
 
                 // week only — always show dot grid
                 binaryDotGrid(analytics.bars)
@@ -272,9 +278,14 @@ struct HabitAnalyticsView: View {
     private func trackedChart(_ analytics: TrackedAnalytics) -> some View {
         HabitCard {
             VStack(alignment: .leading, spacing: 12) {
-                Text(habit.name)
-                    .font(.headline)
-                    .foregroundColor(Theme.primary)
+                HStack(spacing: 0) {
+                    Text(habit.name)
+                        .font(.headline)
+                        .foregroundColor(Theme.primary)
+                    Text("  |  \(formatDateRange(start: analytics.startDate, end: analytics.endDate))")
+                        .font(.headline)
+                        .foregroundColor(Theme.textSecondary)
+                }
 
                 // week only — always show daily bars
                 trackedDailyBars(analytics)
@@ -479,6 +490,17 @@ struct HabitAnalyticsView: View {
         case "orange": return Theme.terracotta.opacity(0.7)
         default: return Theme.lightGray.opacity(0.4)
         }
+    }
+
+    private func formatDateRange(start: String, end: String) -> String {
+        let iso = DateFormatter()
+        iso.dateFormat = "yyyy-MM-dd"
+        let display = DateFormatter()
+        display.dateFormat = "M/d"
+        if let s = iso.date(from: start), let e = iso.date(from: end) {
+            return "\(display.string(from: s)) - \(display.string(from: e))"
+        }
+        return "\(start) - \(end)"
     }
 
     private func formatValue(_ value: Double) -> String {

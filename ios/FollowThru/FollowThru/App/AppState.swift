@@ -52,7 +52,7 @@ final class AppState: ObservableObject {
         do {
             let habitCandidate = AIHabitCandidateDTO(
                 title: candidate.title,
-                category: candidate.category,
+                category: Self.normalizeAICategory(candidate.category),
                 description: candidate.description,
                 suggestedSchedule: candidate.suggestedSchedule,
                 durationMinutes: candidate.durationMinutes,
@@ -472,5 +472,24 @@ final class AppState: ObservableObject {
             return message
         }
         return error.localizedDescription
+    }
+
+    /// Maps AI pipeline category keys (e.g. "fitness", "wellness") to iOS display categories.
+    private static func normalizeAICategory(_ raw: String) -> String {
+        switch raw.lowercased().trimmingCharacters(in: .whitespaces) {
+        case "fitness":              return "Fitness"
+        case "wellness",
+             "health & wellness",
+             "health":               return "Health & Wellness"
+        case "study", "work",
+             "learning":             return "Work"
+        case "reading", "lifestyle": return "Lifestyle"
+        case "sleep":                return "Health & Wellness"
+        case "social":               return "Social"
+        case "finance":              return "Finance"
+        case "creativity",
+             "creative":             return "Creativity"
+        default:                     return "Other"
+        }
     }
 }
