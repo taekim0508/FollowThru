@@ -5,94 +5,111 @@ struct CommunityView: View {
     @State private var searchText = ""
     @State private var commentPost: FeedPost?
     @State private var newComment = ""
+    @State private var selectedTab = 0
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+            VStack(spacing: 0) {
+                Picker("", selection: $selectedTab) {
+                    Text("Social").tag(0)
+                    Text("Activity").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                .background(Theme.background)
+
+                ScrollView {
                     if let err = appState.communityError {
                         Text(err)
                             .font(.footnote)
                             .foregroundColor(.red)
                             .padding(.horizontal)
+                            .padding(.top, 8)
                     }
 
-                    // Search
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Find people")
-                            .font(.headline)
-                            .foregroundColor(Theme.primary)
-                        HStack {
-                            TextField("", text: $searchText, prompt: Text("Search by name or email").foregroundColor(Theme.textSecondary))
-                                .foregroundColor(Theme.primary)
-                                .accentColor(Theme.primary)
-                                .textInputAutocapitalization(.never)
-                                .keyboardType(.emailAddress)
-                                .padding(10)
-                                .background(Theme.white)
-                                .cornerRadius(10)
-                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
-                            Button("Search") {
-                                Task { await appState.searchUsers(query: searchText) }
-                            }
-                            .disabled(searchText.trimmingCharacters(in: .whitespaces).count < 2)
-                        }
-                        ForEach(appState.userSearchResults) { u in
-                            searchRow(u)
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    // Inbox
-                    if !appState.friendInbox.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Friend requests")
-                                .font(.headline)
-                                .foregroundColor(Theme.primary)
-                            ForEach(appState.friendInbox) { req in
-                                inboxRow(req)
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-
-                    // Friends
-                    if !appState.friendsList.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Your friends")
-                                .font(.headline)
-                                .foregroundColor(Theme.primary)
-                            ForEach(appState.friendsList) { f in
+                    if selectedTab == 0 {
+                        VStack(alignment: .leading, spacing: 20) {
+                            // Search
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Find people")
+                                    .font(.headline)
+                                    .foregroundColor(Theme.primary)
                                 HStack {
-                                    Image(systemName: "person.circle.fill")
-                                        .foregroundColor(Theme.sage)
-                                    Text(f.name ?? f.email)
+                                    TextField("", text: $searchText, prompt: Text("Search by name or email").foregroundColor(Theme.textSecondary))
                                         .foregroundColor(Theme.primary)
-                                    Spacer()
+                                        .accentColor(Theme.primary)
+                                        .textInputAutocapitalization(.never)
+                                        .keyboardType(.emailAddress)
+                                        .padding(10)
+                                        .background(Theme.white)
+                                        .cornerRadius(10)
+                                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lightGray))
+                                    Button("Search") {
+                                        Task { await appState.searchUsers(query: searchText) }
+                                    }
+                                    .disabled(searchText.trimmingCharacters(in: .whitespaces).count < 2)
                                 }
-                                .padding(.vertical, 4)
+                                ForEach(appState.userSearchResults) { u in
+                                    searchRow(u)
+                                }
+                            }
+                            .padding(.horizontal)
+
+                            // Inbox
+                            if !appState.friendInbox.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Friend requests")
+                                        .font(.headline)
+                                        .foregroundColor(Theme.primary)
+                                    ForEach(appState.friendInbox) { req in
+                                        inboxRow(req)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+
+                            // Friends
+                            if !appState.friendsList.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Your friends")
+                                        .font(.headline)
+                                        .foregroundColor(Theme.primary)
+                                    ForEach(appState.friendsList) { f in
+                                        HStack {
+                                            Image(systemName: "person.circle.fill")
+                                                .foregroundColor(Theme.sage)
+                                            Text(f.name ?? f.email)
+                                                .foregroundColor(Theme.primary)
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 4)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                        }
+                        .padding(.top, 8)
+                        .padding(.bottom, 24)
+                    } else {
+                        // Activity feed
+                        VStack(alignment: .leading, spacing: 12) {
+                            if appState.communityFeed.isEmpty && !appState.isCommunityLoading {
+                                Text("No posts yet. Complete a habit (or add friends) to see activity here.")
+                                    .font(.subheadline)
+                                    .foregroundColor(Theme.textSecondary)
+                                    .padding(.top, 8)
+                            }
+                            ForEach(appState.communityFeed) { post in
+                                postCard(post)
                             }
                         }
                         .padding(.horizontal)
+                        .padding(.top, 8)
+                        .padding(.bottom, 24)
                     }
-
-                    // Feed
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Activity")
-                            .font(.headline)
-                            .foregroundColor(Theme.primary)
-                        if appState.communityFeed.isEmpty && !appState.isCommunityLoading {
-                            Text("No posts yet. Complete a habit (or add friends) to see activity here.")
-                                .font(.subheadline)
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                        ForEach(appState.communityFeed) { post in
-                            postCard(post)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 24)
                 }
+                .background(Theme.background.ignoresSafeArea())
             }
             .background(Theme.background.ignoresSafeArea())
             .navigationTitle("Community")

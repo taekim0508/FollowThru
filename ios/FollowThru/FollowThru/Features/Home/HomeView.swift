@@ -171,10 +171,12 @@ struct HomeView: View {
 
                     HStack(spacing: 6) {
                         // habit type badge
-                        Text(habit.habitType == "binary" ? "Completion" : "Numeric")
+                        let isBinary = habit.habitType == "binary"
+                        Text(isBinary ? "Completion" : "Numeric")
                             .font(.caption)
+                            .foregroundColor(isBinary ? Theme.sage : Color(hex: "4A7AB5"))
                             .padding(.horizontal, 8).padding(.vertical, 2)
-                            .background(Theme.sageLight)
+                            .background(isBinary ? Theme.sageLight : Color(hex: "E3ECF5"))
                             .cornerRadius(8)
 
                         // streak badge

@@ -62,4 +62,19 @@ struct Theme {
 
     // MARK: – Legacy aliases (kept so unchanged views compile without edits)
     static let softBlue     = Color(hex: "E6EDE4")  // remapped to sageLight
+
+    // MARK: – Category chip styles
+    /// Returns (background, foreground) for a given habit category name.
+    static func categoryChipStyle(_ category: String) -> (background: Color, foreground: Color) {
+        switch category {
+        case "Fitness":           return (Color(hex: "FAE8E0"), Color(hex: "C75A2A"))
+        case "Health & Wellness": return (Color(hex: "E6EDE4"), Color(hex: "6B9462"))
+        case "Work":              return (Color(hex: "E3E8F0"), Color(hex: "4A6FA5"))
+        case "Social":            return (Color(hex: "EDE8F5"), Color(hex: "7B5EA7"))
+        case "Lifestyle":         return (Color(hex: "FBF3DC"), Color(hex: "A0802A"))
+        case "Finance":           return (Color(hex: "E0F0EE"), Color(hex: "3D8C85"))
+        case "Creativity":        return (Color(hex: "FAE8EF"), Color(hex: "B5547A"))
+        default:                  return (Color(hex: "EDEDEC"), Color(hex: "6B7267"))
+        }
+    }
 }
